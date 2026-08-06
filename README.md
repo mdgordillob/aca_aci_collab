@@ -48,3 +48,9 @@ reanalysis, ENSO calibration, bootstrap uncertainty bands, UNGRD disaster
 validation). `ARCHITECTURE.pdf` documents that pipeline in detail; the
 pipeline's own repository is where `data/processed/` and the scripts that
 produce it actually live.
+
+A backup of the raw ERA5 `.grib` downloads that feed the earliest pipeline
+stage (before percentiles/anomalies/`data/processed/` even exist) is kept
+on [Google Drive](https://drive.google.com/drive/folders/17SdbsxVJYnqjPzIlS4FFZ6MowfMcHfqW) --
+see `ARCHITECTURE.pdf` §4 for where that fits in the data flow. `aci_lib`
+itself does not read `.grib` files; it only reads `data/processed/`.

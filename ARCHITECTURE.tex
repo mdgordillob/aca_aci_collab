@@ -177,6 +177,11 @@ reconstructed from what the scripts actually read and write.
 \texttt{data/indices/} and \texttt{data/zones/} exist but are effectively
 empty -- no script currently writes to those exact paths.
 
+\paragraph{Raw ERA5 \texttt{.grib} backup.} \texttt{data/raw/era5/*.grib}
+is gitignored (\Cref{sec:git-gap}) and not reproduced anywhere in version
+control. A backup copy of these raw downloads is kept on Google Drive:
+\url{https://drive.google.com/drive/folders/17SdbsxVJYnqjPzIlS4FFZ6MowfMcHfqW}.
+
 \subsection{Two parallel ``correctness check'' implementations}
 
 There are effectively two independent implementations of the core ACI
