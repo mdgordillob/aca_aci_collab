@@ -1,0 +1,9 @@
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+
+# LaTeX build artifacts (keep the .tex source and compiled .pdf)
+*.aux
+*.log
+*.out
+*.toc

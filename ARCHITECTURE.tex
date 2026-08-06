@@ -1,0 +1,461 @@
+\documentclass[11pt]{article}
+
+\usepackage[margin=0.85in]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage[strings]{underscore}
+\usepackage{booktabs}
+\usepackage{longtable}
+\usepackage{array}
+\usepackage{graphicx}
+\usepackage{hyperref}
+\usepackage{enumitem}
+\usepackage{xcolor}
+\usepackage{listings}
+\usepackage[capitalise]{cleveref}
+
+\hypersetup{colorlinks=true,linkcolor=blue,citecolor=blue,urlcolor=blue}
+
+\lstdefinestyle{pyblock}{
+  basicstyle=\ttfamily\small,
+  breaklines=true,
+  columns=fullflexible,
+  keywordstyle=\color{blue!60!black},
+  commentstyle=\color{gray},
+  stringstyle=\color{green!40!black},
+  frame=single,
+  language=Python,
+}
+\lstset{style=pyblock}
+
+\newcolumntype{L}[1]{>{\raggedright\arraybackslash}p{#1}}
+
+\title{\textbf{ACI-CO Repository Architecture}}
+\author{Colombian Actuarial Climate Index (ACI-CO) pipeline}
+\date{\today}
+
+\begin{document}
+\sloppy
+\maketitle
+
+\begin{abstract}
+This document is a LaTeX companion to \texttt{ARCHITECTURE.md} and
+\texttt{CLAUDE.md} at the repository root. It describes how the ACI-CO
+codebase is organized: the scientific target it computes, the actual data
+flow between scripts (as opposed to the README's idealized version), where
+the repository's documentation is authoritative versus stale, and how to
+read already-processed outputs from a notebook (e.g.\ Google Colab) using
+the \texttt{aci_lib} data-access library introduced alongside this document.
+It is a description of the codebase as it stands, not a specification --
+where the code and the docs disagree, the code wins.
+\end{abstract}
+
+\tableofcontents
+
+%======================================================================
+\section{What this repository is}
+%======================================================================
+
+This is a research pipeline that builds the \textbf{Colombian Actuarial
+Climate Index (ACI-CO)} from ERA5(-Land) reanalysis data (1961--2024): a
+Colombian adaptation of the Actuaries Climate Index (ACI) framework,
+extended with ENSO calibration, a bootstrap uncertainty band, multi-dataset
+robustness checks, and validation against Colombia's national disaster
+registry (UNGRD).
+
+It is an active research codebase, not a packaged library: there is no test
+suite, several parallel/experimental implementations of the same pipeline
+stage coexist deliberately, and a non-trivial share of the \emph{working}
+pipeline was never committed to git (\Cref{sec:git-gap}).
+
+\paragraph{Authoritative methodology source.} The methodology (how T90,
+T10, Rx5day, CDD and WP are computed; how the composite, ENSO decomposition,
+and bootstrap bands work) is described in
+\texttt{articles/\allowbreak aci\_co\_submission/\allowbreak article1.tex}, \S3--\S7 -- \emph{not}
+the older root-level \texttt{articles/article1.tex} (a superseded
+LOWESS-based draft), and not the empty stubs in \texttt{docs/methodology.md}
+/ \texttt{docs/results.md} / \texttt{docs/zones\_description.md}.
+
+%======================================================================
+\section{The scientific target: ACI-CO}
+%======================================================================
+
+The ACI-CO composite is the unweighted mean of five signed, standardized
+components (divided by $K=5$; an earlier draft divided by 6 for a
+placeholder sea-level component, since dropped for lack of tide-gauge
+coverage):
+
+\begin{longtable}{@{}L{2.2cm}L{6.2cm}L{1.5cm}L{4.5cm}@{}}
+\toprule
+\textbf{Component} & \textbf{Meaning} & \textbf{Sign} & \textbf{Threshold} \\
+\midrule
+\endhead
+T90 & Fraction of days/month with temperature above the 1961--1990 baseline 90th percentile & $+$ & Empirical P90 per grid cell $\times$ calendar month \\
+T10 & Fraction of days/month with temperature below the baseline 10th percentile & $-$ & Empirical P10 \\
+Rx5day & Max 5-day precipitation total per month, $z$-scored vs.\ 1961--1990 climatology & $+$ & $z$-score vs.\ monthly climatology \\
+CDD & Annual max consecutive dry days ($<$1\,mm), interpolated onto the monthly axis & $+$ & --- \\
+WP & Wind-power ($\propto U^3$) exceedance & $+$ & Empirical P90 (current); replaces an earlier parametric $\mu + 1.28\sigma$ threshold, discarded because WP is right-skewed \\
+\bottomrule
+\end{longtable}
+
+\subsection{Extensions beyond the base ACI framework}
+
+\begin{itemize}[leftmargin=*]
+\item \textbf{ENSO-neutral decomposition} (\S4): asymmetric ARIMAX
+  regression per component/region on Ni\~no-3.4 ($E^+=\max(E,0)$,
+  $E^-=\min(E,0)$) plus a linear trend and AR($p$) errors, separating
+  secular warming from ENSO-driven variability.
+\item \textbf{Bootstrap uncertainty bands} (\S4.4): block-resample
+  ($L=12$\,mo) the 1961--1990 baseline composite into $B=500$ (national) /
+  $B=200$ (regional) null-model replicates, testing whether the observed
+  trend exceeds baseline-period variability. Replaced an earlier LOWESS
+  residual-envelope approach.
+\item \textbf{Multi-dataset robustness} (\S5): ERA5-Land vs.\ ERA5 standard
+  vs.\ CHIRPS.
+\item \textbf{UNGRD validation} (\S7): negative-binomial regression of
+  disaster counts (floods, landslides, windthrow, vegetation fires --
+  49{,}734 events, 1998--2022) on ACI-CO components.
+\end{itemize}
+
+\subsection{Regions actually computed}
+
+Despite the paper conceptually discussing 5 natural regions and 32
+departments, the implementation aggregates \textbf{4 units}: national
+(area-weighted, all of Colombia) and 3 departments chosen for insurance
+relevance -- \textbf{Antioquia}, \textbf{Cundinamarca-Bogot\'a}, and
+\textbf{Valle del Cauca}. Shapefiles also exist for Bogot\'a, Medell\'in,
+Cali, San Andr\'es/Providencia, Pac\'ifico, and Amazonas, but the
+corresponding \texttt{data/processed/anomalias\_\{bogota,medellin,\allowbreak san\_andres\_providencia\}/}
+directories are empty -- never populated.
+
+%======================================================================
+\section{Repository layout}
+%======================================================================
+
+\begin{longtable}{@{}L{3.2cm}L{10.8cm}@{}}
+\toprule
+\textbf{Path} & \textbf{Contents} \\
+\midrule
+\endhead
+\texttt{src/scripts/} & The original OPT pipeline: download, percentile, and anomaly-calculation scripts (\texttt{calcular\_*}, \texttt{ecmwf\_descarga.py}, \texttt{unir\_archivos.py}, \texttt{graficas.py}, \dots). Spanish-language docstrings dominate here. \\
+\texttt{src/forecast\_scripts/} & Two independent forecasting families (AutoTS ensembles vs.\ SARIMAX/ETS + ENSO) plus \texttt{common/}, the shared modules extracted from both (\Cref{sec:forecast-common}). English-language, newer code. \\
+\texttt{src/dashboard/} & \texttt{app.py} -- a read-only Streamlit dashboard that reads Stage 3/5 CSVs directly; not a pipeline stage. \\
+\texttt{src/utils/} & Shared helpers (\texttt{get\_available\_years}, \texttt{get\_cached\_shapefile}), consolidated from near-identical copies previously duplicated across the \texttt{calcular\_*} scripts. \\
+\texttt{src/aci\_lib/} & Read-only data-access library for notebooks (\Cref{sec:aci-lib}) -- added alongside this document, not part of the original OPT/forecast pipeline. \\
+\texttt{data/raw/}, \texttt{data/processed/} & Pipeline inputs/outputs, entirely gitignored except for \texttt{.gitkeep} placeholders (\Cref{sec:git-gap}). \\
+\texttt{articles/} & Three papers at different stages: the current submission (\texttt{aci\_co\_submission/}), a superseded LOWESS draft (\texttt{article1.tex}), and a separate forecasting report (\texttt{AnnualICAForecast\_Report.tex}). \\
+\texttt{docs/} & Mostly empty stubs (\texttt{methodology.md}, \texttt{results.md}, \texttt{zones\_description.md}); the one substantive file is \texttt{Diccionario.md}, a $\sim$2400-line data-source vetting document. \\
+\texttt{tests/} & Placeholder only (\texttt{test.txt}); there is no test suite or CI. \\
+\bottomrule
+\end{longtable}
+
+%======================================================================
+\section{Actual data flow}
+%======================================================================
+
+The README describes an idealized 8-step flow; several of the scripts it
+names do not exist (\Cref{sec:discrepancies}). The flow below is
+reconstructed from what the scripts actually read and write.
+
+\begin{longtable}{@{}L{2.2cm}L{5.2cm}L{6.6cm}@{}}
+\toprule
+\textbf{Stage} & \textbf{Script(s)} & \textbf{Output} \\
+\midrule
+\endhead
+0. Download & \texttt{ecmwf\_descarga.py} (canonical), \texttt{sst\_descarga.py}, \texttt{get\_aux\_data.py}, IDEAM station data via \texttt{pyreadr} & \texttt{data/raw/era5/*.grib}, SST GRIB, \texttt{data/raw/auxiliary/}, \texttt{data/raw/ideam/*.rds} \\
+1. Merge / resample & \texttt{unir\_archivos.py}; independently, the untracked \texttt{run\_aci\_colombia.py} re-merges raw GRIB into a from-scratch reimplementation & \texttt{era5\_daily\_combined\_\{tmp,\allowbreak rain,\allowbreak wind\}.nc}; \texttt{data/processed/aci\_daily/}, \texttt{aci\_colombia\_1961\_2024.csv} \\
+2. Percentiles (1961--1990 baseline) & \texttt{calcular\_percentil\_\{temperatura,\allowbreak lluvia,\allowbreak viento\}.py} & \texttt{era5\_*\_percentil.nc}, \texttt{percentiles*.csv} \\
+3. Anomalies, per region & \texttt{calcular\_anomalias\_\{temperatura,\allowbreak lluvia,\allowbreak viento\}.py}, orchestrated by \texttt{calcular\_anomalias\_regiones.py} over \texttt{data/shapefiles/*.shp} & \texttt{data/processed/anomalias\_<region>/anomalies\_\{temperature,\allowbreak precipitation,\allowbreak drought,\allowbreak wind\}\_combined.csv} (populated: antioquia, cali, colombia, cundinamarca\_bogota, valle\_cauca; empty: bogota, medellin, san\_andres\_providencia) \\
+4. Daily variants & \texttt{produce\_daily\_anomalies.py}, \texttt{append\_2025\_2026.py} (untracked) & \texttt{data/processed/daily\_anomalies/*.xlsx} \\
+5. ENSO / SST index & \texttt{anomalias\_sst\_daily.py}, \texttt{compare\_enso\_flags.py} & \texttt{sst\_index\_colombia\_pacific.csv}, \texttt{enso\_flag\_comparison.csv}, validated against NOAA CPC \texttt{oni.ascii.txt} \\
+6. Downscaling & \texttt{downscale\_era5\_temperature.py}, \texttt{downscale\_era5\_tp.py} (RandomForest, DEM/NDVI/IDEAM) & \texttt{data/processed/downscaled/}, validated in \texttt{data/processed/era5\_ideam\_comparison/} \\
+7. Visualization / export & \texttt{graficas.py}, \texttt{generate\_correlation\_matrices.py} & \texttt{articles/graficas/<region>/*.png}, xlsx exports, correlation heatmaps \\
+8. Forecasting & Two independent families -- see \Cref{sec:forecast-common} & \texttt{articles/graficas/forecast\_*/} \\
+\bottomrule
+\end{longtable}
+
+\texttt{data/indices/} and \texttt{data/zones/} exist but are effectively
+empty -- no script currently writes to those exact paths.
+
+\subsection{Two parallel ``correctness check'' implementations}
+
+There are effectively two independent implementations of the core ACI
+algorithm in this repository:
+
+\begin{itemize}[leftmargin=*]
+\item \textbf{The OPT pipeline} (\texttt{src/scripts/calcular\_*}, tracked
+  in git, the README's documented flow) -- the original project pipeline,
+  per-region, percentile/anomaly based.
+\item \textbf{\texttt{run\_aci\_colombia.py}} (untracked) -- a from-scratch
+  reimplementation of the ACI-Python reference algorithm directly on raw
+  GRIB, used to cross-validate the OPT pipeline's output.
+  \texttt{compare\_aci\_colombia.py} and \texttt{compare\_repos.py} (also
+  untracked) diff the two and document the algorithmic differences.
+\end{itemize}
+
+Neither is ``the old version'' of the other -- they are independent
+implementations kept deliberately in sync for cross-validation, and this
+comparison grounds the paper's ``validation against x-ACI'' discussion
+(\S8).
+
+\subsection{Forecasting: two families plus shared modules}
+\label{sec:forecast-common}
+
+Two independent forecasting families exist side by side and are \emph{not}
+a superset/subset of each other:
+
+\begin{itemize}[leftmargin=*]
+\item \texttt{forecast\_ica\_\{monthly,daily\}.py} -- AutoTS ensembles.
+\item The \texttt{ETS(X)\_*} family -- statsmodels SARIMAX/ETS with an
+  ENSO exogenous regressor.
+\end{itemize}
+
+\texttt{src/forecast\_scripts/common/} holds logic that was byte-identical
+or near-identical across these scripts before consolidation:
+
+\begin{longtable}{@{}L{3.0cm}L{5.7cm}L{5.1cm}@{}}
+\toprule
+\textbf{Module} & \textbf{Extracted from} & \textbf{Used by} \\
+\midrule
+\endhead
+\texttt{data\_loading.py} & Byte-identical in \texttt{forecast\_ica\_monthly.py} and \texttt{ETS\_ica\_forecast.py} & Both, via thin same-named wrapper methods \\
+\texttt{climate\_index.py} & Near-identical in all three monthly forecasters & All three \\
+\texttt{stationarity.py} & Near-identical in \texttt{ETS\_ica\_forecast.py} / \texttt{ETSX\_ica\_forecast.py} & Both \\
+\texttt{diagnostics.py} (\texttt{Model\-Error\-Diagnostics}) & Moved unchanged from the old \texttt{error\_diagnostics.py} & Not currently called by anything \\
+\bottomrule
+\end{longtable}
+
+Deliberately \emph{not} merged (structurally parallel, not literal
+duplicates): the \texttt{ONIDataHandler}\allowbreak/\texttt{ONIDataHandlerDaily}
+ENSO-fetching classes, the SARIMAX+Lasso fitting methods, the AutoTS setup
+(same shape, different hyperparameters), and all
+\texttt{visualize\_forecasts}-style plotting methods (4 separate
+implementations, each with different overlays).
+
+%======================================================================
+\section{Documentation status}
+%======================================================================
+
+\begin{longtable}{@{}L{4.6cm}L{9.4cm}@{}}
+\toprule
+\textbf{Document} & \textbf{Status} \\
+\midrule
+\endhead
+\texttt{docs/methodology.md}, \texttt{docs/results.md}, \texttt{docs/zones\_description.md} & Empty stubs. Methodology lives in \texttt{articles/aci\_co\_submission/article1.tex} instead. \\
+\texttt{docs/explicacion\_excel.md} & One truncated sentence, no body. \\
+\texttt{docs/data\_dictionary.md} & Early, incomplete fragment (HUMBOLDT-only) of \texttt{docs/Diccionario.md}. \\
+\texttt{docs/Diccionario.md} & The real, complete data-source vetting document ($\sim$2400 lines, 20 candidate sources evaluated). Canonical over \texttt{data\_dictionary.md}. \\
+\texttt{README.md} & Describes an idealized 8-step flow; two referenced scripts do not exist. \\
+\bottomrule
+\end{longtable}
+
+%======================================================================
+\section{Discrepancies between README/docstrings and reality}
+\label{sec:discrepancies}
+%======================================================================
+
+\begin{itemize}[leftmargin=*]
+\item README step 1 says to run \texttt{descargar\_datos.py} -- it does not
+  exist; \texttt{ecmwf\_descarga.py} is the actual entry point.
+\item README step 6 says to run \texttt{sealevel.py} -- does not exist.
+  \texttt{sealevel2.py} exists but does not do sea-level analysis; it is a
+  Mann-Kendall trend + Q-Q normality check on precipitation-like series with
+  leftover Jupyter cell markers, suggesting it was pasted from a notebook
+  and misnamed. Sea level is not part of the current ACI-CO methodology.
+\item \texttt{src/scripts/earthub\_descarga.py} has a whole-file
+  indentation error and cannot run as-is, on top of embedding a live-looking
+  credential (\Cref{sec:secrets}).
+\item \texttt{src/scripts/display.py} is not a plotting module -- it is a
+  Greece-precipitation download script (also embeds the same credential)
+  that produced a 562\,MB \texttt{.nc} file at the repo root as a side
+  effect.
+\item Stale internal docstrings/comments: \texttt{era5datasets.py} says
+  \texttt{"""compare\_land\_only.py"""}; \texttt{get\_aux\_data.py}'s header
+  says \texttt{get\_auxiliary\_data.py}. Trust the filename/git path.
+\item \texttt{graficas\_altaresolucion.py} is a 4-line dead stub.
+\item \texttt{ETSX\_seasonal\_motif\_forecast.py} (the ``broken two-stage
+  Lasso$\to$ETS'' approach \texttt{ETSX\_daily\_ica\_forecast.py}'s
+  docstring says it replaced) has been deleted -- confirmed unused before
+  removal.
+\item \texttt{example\_grid\_search\_era5.py} imports \texttt{ONIDataHandler}
+  from \texttt{ETSX\_ica\_forecast.py} expecting methods that do not exist
+  on that class -- a pre-existing break, unrelated to the forecast\_scripts
+  modularization.
+\item \texttt{articles/AnnualICAForecast\_Report.tex} references
+  \texttt{scripts/daily\_forecast\_to\_annual.py} and
+  \texttt{scripts/ar1\_vs\_ets\_final.py} -- neither exists anywhere in the
+  repository. Treat that report's pipeline as documented-but-unimplemented.
+\end{itemize}
+
+%======================================================================
+\section{The git tracking gap}
+\label{sec:git-gap}
+%======================================================================
+
+A significant portion of the \emph{current, more-correct} pipeline exists
+only in the working tree and has never been \texttt{git add}ed:
+\texttt{run\_aci\_colombia.py}, \texttt{compare\_aci\_colombia.py},
+\texttt{compare\_repos.py}, \texttt{create\_region\_shapefiles.py},
+\texttt{probe\_2025.py}, \texttt{produce\_daily\_anomalies.py},
+\texttt{append\_2025\_2026.py}, \texttt{reproduce.py},
+\texttt{plot\_repo\_anomalies.py}, and most of \texttt{articles/} (the
+\texttt{aci\_co\_submission/} folder, \texttt{produce\_paper\_plots.py},
+\texttt{build\_validation\_outputs.py}, etc.).
+
+Conversely, things that \emph{are} committed include generated junk
+(\texttt{presentation.aux/log/out}, \texttt{texput.log},
+\texttt{output.log}, \texttt{comparison.png}, \texttt{storm\_daniel.png},
+\texttt{.vs/}, \texttt{proyecto-indices/}, root-level \texttt{.nc}/\texttt{.csv}
+data files) and a \texttt{.gitignore} that was itself accidentally
+overwritten with a PowerShell heredoc command instead of its output.
+
+\textbf{Untracked here often means ``uncommitted work in progress,'' not
+``disposable.''} Do not delete untracked files without checking which side
+of this split they are on.
+
+\subsection{Known secrets in the repository}
+\label{sec:secrets}
+
+Two Earth Data Hub PAT tokens are hardcoded and \textbf{committed} in
+\texttt{src/scripts/display.py} (line 13) and
+\texttt{src/scripts/earthub\_descarga.py} (line 15) -- the same token,
+duplicated. A CDS API key also appears in
+\texttt{GRID\_SEARCH\_AND\_ERA5\_GUIDE.md} (line 44). These require
+rotation/history-scrubbing independent of any code change. New download
+scripts should follow the pattern in \texttt{ecmwf\_descarga.py} /
+\texttt{sst\_descarga.py}: \texttt{cdsapi.Client()} reads credentials from
+the user's local \texttt{\textasciitilde/.cdsapirc}, nothing embedded in
+source.
+
+%======================================================================
+\section{The \texttt{aci\_lib} data-access library}
+\label{sec:aci-lib}
+%======================================================================
+
+\texttt{src/aci\_lib/} is a small, dependency-light Python package that
+turns \texttt{data/processed/} into a browsable, loadable catalog, so that
+already-computed pipeline outputs can be pulled into a notebook (locally or
+in Google Colab) without knowing the directory's internal layout by heart.
+
+\subsection{Why it exists}
+
+\texttt{data/processed/} mixes single tabular files, single gridded
+NetCDF files, and long runs of per-year or per-year-month NetCDF files that
+really form one logical time series (e.g.\ 768 files under
+\texttt{anomalias\_colombia/anomalies\_temperature\_\allowbreak 1961\_1.nc}
+through \texttt{\_2024\_12.nc}). \texttt{aci\_lib} groups the latter
+automatically and exposes a uniform three-function API:
+
+\begin{itemize}[leftmargin=*]
+\item \texttt{list\_datasets()} -- a DataFrame of every dataset name, kind,
+  file count, and (where known) a description sourced from this
+  document's data-flow tables.
+\item \texttt{describe(name)} -- the underlying file list and kind for one
+  dataset.
+\item \texttt{load(name)} -- returns a \texttt{pandas.DataFrame} for
+  CSV/XLSX datasets, an \texttt{xarray.Dataset} for single or multi-file
+  NetCDF datasets (opened lazily via \texttt{xarray.open\_mfdataset}), or a
+  file path for images/raw text files.
+\end{itemize}
+
+\subsection{Important caveat: data is not in git}
+
+\texttt{data/processed/} is entirely gitignored (\Cref{sec:git-gap}) --
+only a \texttt{.gitkeep} placeholder is tracked. A plain \texttt{git clone}
+of this repository, including in Colab, brings the \emph{code} in
+\texttt{src/aci\_lib/} but \emph{not} the data it reads. The data must be
+supplied separately: mount it from Google Drive, upload and unzip an
+archive of \texttt{data/processed/}, or copy it in via any other means
+available in the notebook environment.
+
+\subsection{Quickstart in Google Colab}
+
+\begin{lstlisting}
+# 1. Get the code (data/processed/ is gitignored, so this clone
+#    does NOT include the data -- only src/aci_lib/).
+!git clone https://github.com/<org>/aca_indice_climatico_opt-main.git
+import sys
+sys.path.insert(0, "/content/aca_indice_climatico_opt-main/src")
+
+# 2. Supply the data. Pick ONE of:
+#  (a) mount Drive, if data/processed/ was uploaded there beforehand:
+from google.colab import drive
+drive.mount("/content/drive")
+DATA_DIR = "/content/drive/MyDrive/aca_data/processed"
+
+#  (b) upload + unzip a local copy:
+# from google.colab import files
+# files.upload()  # e.g. processed.zip
+# !unzip -q processed.zip -d /content/aci_data
+# DATA_DIR = "/content/aci_data/processed"
+
+import aci_lib
+aci_lib.set_data_dir(DATA_DIR)
+
+# 3. Browse and load.
+catalog = aci_lib.list_datasets()
+catalog.head(20)
+
+national_composite = aci_lib.load(
+    "anomalias_colombia/anomalies_temperature_combined"
+)  # -> pandas.DataFrame
+
+gridded_series = aci_lib.load(
+    "anomalias_colombia/anomalies_temperature"
+)  # -> xarray.Dataset, lazily concatenated from ~768 monthly files
+\end{lstlisting}
+
+Run locally, inside a checkout of this repository, \texttt{set\_data\_dir()}
+is unnecessary: \texttt{aci\_lib.get\_data\_dir()} walks up from
+\texttt{src/aci\_lib/} to find the repository root (marked by
+\texttt{CLAUDE.md}) and locates \texttt{data/processed/} on its own.
+
+\subsection{Scope}
+
+\texttt{aci\_lib} currently covers everything under \texttt{data/processed/}
+only -- it does not reach into \texttt{articles/*/graficas/\allowbreak paper\_figures/}
+(the paper's final figures/tables) or \texttt{data/raw/}. Both are
+reasonable follow-up extensions if a notebook workflow needs them, but were
+kept out of scope to keep the catalog's grouping logic simple and its
+descriptions trustworthy.
+
+%======================================================================
+\section{Cleanup priorities (standing list)}
+%======================================================================
+
+Ordered roughly by urgency/impact; see \texttt{ARCHITECTURE.md} for the
+canonical, living version of this list.
+
+\begin{enumerate}[leftmargin=*]
+\item \textbf{Secrets}: rotate the Earth Data Hub PAT tokens and the CDS
+  key (\Cref{sec:secrets}); scrub from git history if the two committed
+  copies need to be fully removed.
+\item \textbf{Commit the real pipeline}: the untracked files listed in
+  \Cref{sec:git-gap}.
+\item \textbf{Purge committed generated junk}: build artifacts and
+  data files committed at the repo root instead of under \texttt{data/}.
+\item \textbf{Fix \texttt{.gitignore}}: currently wraps the real ignore
+  rules in a literal PowerShell heredoc command that got committed instead
+  of its output.
+\item \textbf{Delete disk-only bloat} (not committed, safe to remove
+  locally): environment archives, unrelated test data, \texttt{\_\_pycache\_\_/}.
+\item \textbf{Consolidate duplicated helpers} into \texttt{src/utils/}
+  (mostly done -- see \texttt{get\_available\_years},
+  \texttt{get\_cached\_shapefile}).
+\item \textbf{Resolve naming/content mismatches}: \texttt{display.py},
+  \texttt{sealevel2.py}, stale internal docstrings.
+\item \textbf{Decide the fate of superseded scripts}:
+  \texttt{graficas\_altaresolucion.py}, \texttt{docs/data\_dictionary.md},
+  root \texttt{articles/article1.tex}.
+\item \textbf{Fill or drop the empty doc stubs} in \texttt{docs/}.
+\item \textbf{Populate or drop} the empty
+  \texttt{data/processed/anomalias\_\{bogota,medellin,san\_andres\_providencia\}/}
+  directories and the unused \texttt{data/indices/}, \texttt{data/zones/}
+  locations.
+\end{enumerate}
+
+Confirm scope with a maintainer before acting on any of these -- several
+things that look like dead scratch code are load-bearing work that simply
+never got committed (\Cref{sec:git-gap}).
+
+\end{document}
