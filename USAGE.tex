@@ -1,0 +1,375 @@
+\documentclass[11pt]{article}
+
+\usepackage[margin=0.85in]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage[strings]{underscore}
+\usepackage{booktabs}
+\usepackage{longtable}
+\usepackage{array}
+\usepackage{graphicx}
+\usepackage{hyperref}
+\usepackage{enumitem}
+\usepackage{xcolor}
+\usepackage{listings}
+\usepackage[capitalise]{cleveref}
+
+\hypersetup{colorlinks=true,linkcolor=blue,citecolor=blue,urlcolor=blue}
+
+\lstdefinestyle{pyblock}{
+  basicstyle=\ttfamily\small,
+  breaklines=true,
+  columns=fullflexible,
+  keywordstyle=\color{blue!60!black},
+  commentstyle=\color{gray},
+  stringstyle=\color{green!40!black},
+  frame=single,
+  language=Python,
+}
+\lstset{style=pyblock}
+
+\newcolumntype{L}[1]{>{\raggedright\arraybackslash}p{#1}}
+
+\title{\textbf{aci\_lib User Guide}}
+\author{ACI-CO processed-data toolkit}
+\date{\today}
+
+\begin{document}
+\sloppy
+\maketitle
+
+\begin{abstract}
+This is a practical how-to for the contents of this repository:
+\texttt{src/aci\_lib/} (a small Python package for reading already-computed
+ACI-CO pipeline outputs into pandas/xarray) and
+\texttt{notebooks/aci\_lib\_quickstart.ipynb} (a Google Colab notebook built
+on top of it). For \emph{why} the underlying data looks the way it does --
+the ACI-CO methodology, the pipeline that produced it, which scripts wrote
+which files -- see the companion \texttt{ARCHITECTURE.pdf} in this same
+repository instead. This document only covers using what is already built.
+\end{abstract}
+
+\tableofcontents
+
+%======================================================================
+\section{What's in this repository}
+%======================================================================
+
+\begin{longtable}{@{}L{3.6cm}L{10.4cm}@{}}
+\toprule
+\textbf{Path} & \textbf{Contents} \\
+\midrule
+\endhead
+\texttt{src/aci\_lib/} & The library itself: four small modules (\Cref{sec:api}). No third-party code, only pandas/xarray at call time. \\
+\texttt{notebooks/aci\_lib\_\allowbreak quickstart.ipynb} & A ready-to-run Colab notebook: clones this repo, points \texttt{aci\_lib} at your data, browses the catalog, loads two example datasets, plots one (\Cref{sec:notebook}). \\
+\texttt{ARCHITECTURE.tex} / \texttt{.pdf} & The source pipeline's architecture: scientific target, data flow, known issues. Reference material, not a how-to. \\
+\bottomrule
+\end{longtable}
+
+\textbf{What is not in this repository:} the data itself. \texttt{data/processed/}
+from the source ACI-CO project is roughly 13\,GB across 8{,}000+ files --
+too large for git -- so it is never committed here. Every workflow below
+starts by pointing \texttt{aci\_lib} at a copy of that directory that you
+supply (\Cref{sec:data-supply}).
+
+%======================================================================
+\section{Setup}
+%======================================================================
+
+\subsection{Requirements}
+
+\texttt{aci\_lib} itself has no hard dependencies beyond the standard
+library at import time; individual functions import what they need lazily:
+
+\begin{itemize}[leftmargin=*]
+\item \texttt{pandas} -- always (used by \texttt{list\_datasets()}, and by \texttt{load()} for CSV/XLSX).
+\item \texttt{openpyxl} -- only if you load an \texttt{.xlsx} dataset.
+\item \texttt{xarray} and \texttt{dask} -- only if you load a NetCDF dataset.
+\item A NetCDF backend for xarray (\texttt{netCDF4} or \texttt{h5netcdf}) -- same condition.
+\item \texttt{matplotlib} -- only if you plot; not imported by the library at all.
+\end{itemize}
+
+In Google Colab, all of these are preinstalled. Locally, install them with
+your usual environment manager if they are not already present (they are,
+in the source ACI-CO project's environment, since its own scripts use the
+same stack).
+
+\subsection{Getting the code onto \texttt{sys.path}}
+
+\texttt{aci\_lib} is not published as a package -- there is no
+\texttt{pip install}. You put \texttt{src/} on \texttt{sys.path} and import
+it directly.
+
+\paragraph{In Colab:}
+\begin{lstlisting}
+!git clone --depth 1 https://github.com/mdgordillob/aca_aci_collab.git
+import sys
+sys.path.insert(0, "/content/aca_aci_collab/src")
+import aci_lib
+\end{lstlisting}
+
+\paragraph{Locally, from a checkout of this repo:}
+\begin{lstlisting}
+import sys, os
+sys.path.insert(0, os.path.abspath("src"))  # or "../src" from notebooks/
+import aci_lib
+\end{lstlisting}
+
+%======================================================================
+\section{Supplying the data}
+\label{sec:data-supply}
+%======================================================================
+
+\texttt{aci\_lib} needs to know where a copy of \texttt{data/processed/}
+lives. It resolves this in the following order the first time it is
+needed:
+
+\begin{enumerate}[leftmargin=*]
+\item An explicit \texttt{aci\_lib.set\_data\_dir(path)} call.
+\item The \texttt{ACI\_DATA\_DIR} environment variable.
+\item Auto-detection: walking up from \texttt{src/aci\_lib/} to the nearest
+  directory containing a \texttt{.git} folder (the repo root), then
+  checking whether \texttt{data/processed/} exists under it.
+\end{enumerate}
+
+If none of these resolve to a real directory, every \texttt{aci\_lib} call
+that needs data raises \texttt{FileNotFoundError} with a message pointing
+back to this section.
+
+\begin{longtable}{@{}L{3.0cm}L{5.3cm}L{5.7cm}@{}}
+\toprule
+\textbf{Method} & \textbf{When to use it} & \textbf{How} \\
+\midrule
+\endhead
+Local checkout of the \emph{source} project & You have the ACI-CO pipeline repo cloned locally, with \texttt{data/processed/} already populated on disk & Nothing to do -- auto-detection (step 3 above) finds it. \\
+Mount Google Drive & Colab, and you have already uploaded \texttt{data/processed/} to your Drive & \texttt{drive.mount(\allowbreak"/content/drive")}, then \texttt{aci\_lib.set\_data\_dir(\allowbreak"/content/drive/MyDrive/\allowbreak <path>/processed")} \\
+Upload + unzip & Colab, one-off, no Drive setup wanted & \texttt{files.upload()} a zip, \texttt{!unzip} it, then \texttt{set\_data\_dir()} to the unzipped path \\
+Environment variable & Any script/notebook where you'd rather configure via environment than code & \texttt{export ACI\_DATA\_DIR=/path/to/processed} (shell) or \texttt{os.environ["ACI\_DATA\_DIR"] = ...} before importing \\
+\bottomrule
+\end{longtable}
+
+All four are demonstrated in \texttt{notebooks/aci\_lib\_quickstart.ipynb}.
+
+%======================================================================
+\section{API reference}
+\label{sec:api}
+%======================================================================
+
+Four functions, all imported directly off the \texttt{aci\_lib} package.
+
+\subsection{\texttt{set\_data\_dir(path)}}
+
+Points the library at a \texttt{data/processed}-like directory for the
+rest of the session. Raises \texttt{FileNotFoundError} immediately if
+\texttt{path} is not a directory (fails fast rather than deferring the
+error to the first \texttt{load()} call).
+
+\begin{lstlisting}
+aci_lib.set_data_dir("/content/drive/MyDrive/aca_data/processed")
+\end{lstlisting}
+
+\subsection{\texttt{get\_data\_dir()}}
+
+Returns whatever directory \texttt{aci\_lib} is currently configured to
+read from (see the resolution order in \Cref{sec:data-supply}). Useful to
+sanity-check setup before calling \texttt{list\_datasets()}:
+
+\begin{lstlisting}
+print(aci_lib.get_data_dir())
+\end{lstlisting}
+
+\subsection{\texttt{list\_datasets(base\_dir=None, kind=None)}}
+
+Returns a \texttt{pandas.DataFrame}, one row per loadable dataset, columns
+\texttt{name}, \texttt{kind}, \texttt{n\_files}, \texttt{description}.
+\texttt{base\_dir} overrides the configured data directory for this call
+only (does not call \texttt{set\_data\_dir}). \texttt{kind} filters to one
+of \texttt{"tabular"}, \texttt{"grid"}, \texttt{"grid\_series"},
+\texttt{"image"}, \texttt{"raw"} (\Cref{sec:naming} explains what each
+means).
+
+\begin{lstlisting}
+aci_lib.list_datasets()                       # everything
+aci_lib.list_datasets(kind="tabular")         # only CSV/XLSX datasets
+aci_lib.list_datasets()[lambda d: d.name.str.contains("colombia")]
+\end{lstlisting}
+
+\subsection{\texttt{describe(name, base\_dir=None)}}
+
+Returns the underlying \texttt{Dataset} record for one catalog entry: its
+\texttt{name}, \texttt{kind}, the full list of file paths it is built
+from, and its \texttt{description}. Useful to see exactly which files a
+\texttt{grid\_series} dataset will open before loading potentially
+gigabytes of NetCDF.
+
+\begin{lstlisting}
+ds = aci_lib.describe("anomalias_colombia/anomalies_temperature")
+print(ds.kind, ds.n_files)
+print(ds.files[:3])
+\end{lstlisting}
+
+\subsection{\texttt{load(name, base\_dir=None)}}
+
+The main entry point. Returns different Python types depending on the
+dataset's \texttt{kind}:
+
+\begin{longtable}{@{}L{2.4cm}L{4.6cm}L{7.0cm}@{}}
+\toprule
+\textbf{Kind} & \textbf{Returns} & \textbf{Notes} \\
+\midrule
+\endhead
+\texttt{tabular} & \texttt{pandas.DataFrame} & \texttt{pd.read\_csv} or \texttt{pd.read\_excel} depending on the source file's extension. \\
+\texttt{grid} & \texttt{xarray.Dataset} & A single NetCDF file, opened with \texttt{xr.open\_dataset}. \\
+\texttt{grid\_series} & \texttt{xarray.Dataset} & Many NetCDF files (e.g.\ one per year-month) opened lazily with \texttt{xr.open\_mfdataset} and concatenated along a \texttt{file} dimension, in chronological order. Backed by dask -- see \Cref{sec:perf}. \\
+\texttt{image} & \texttt{str} & The file path (a \texttt{.png}); open it with \texttt{PIL.Image.open(...)} or \texttt{plt.imread(...)} yourself. \\
+\texttt{raw} & \texttt{str} & The file path for anything else (\texttt{.txt}, \texttt{.ascii}, \texttt{.zip}, ...); read it yourself. \\
+\bottomrule
+\end{longtable}
+
+Raises \texttt{KeyError} if \texttt{name} is not in the catalog -- the
+message points back to \texttt{list\_datasets()}.
+
+\begin{lstlisting}
+df = aci_lib.load("anomalias_colombia/anomalies_temperature_combined")
+grid = aci_lib.load("anomalias_colombia/anomalies_temperature")
+img_path = aci_lib.load("confusion_matrix")
+\end{lstlisting}
+
+%======================================================================
+\section{How dataset names are built}
+\label{sec:naming}
+%======================================================================
+
+Names mirror \texttt{data/processed/}'s directory structure, with the file
+extension stripped:
+
+\begin{itemize}[leftmargin=*]
+\item A file directly under \texttt{data/processed/}, e.g.
+  \texttt{ungrd\_monthly.csv}, becomes \texttt{"ungrd\_monthly"}
+  (\texttt{kind="tabular"}).
+\item A file in a subdirectory, e.g.
+  \texttt{anomalias\_colombia/anomalies\_temperature\_combined.csv}, becomes
+  \texttt{"anomalias\_colombia/anomalies\_temperature\_combined"}.
+\item A \emph{run} of NetCDF files that share a prefix and differ only by a
+  trailing \texttt{\_YYYY} or \texttt{\_YYYY\_MM}, e.g.\
+  \texttt{anomalies\_temperature\_1961\_1.nc} through
+  \texttt{\_2024\_12.nc} (768 files), collapses to one entry named after
+  the shared prefix -- \texttt{"anomalias\_colombia/\allowbreak anomalies\_temperature"} --
+  with \texttt{kind="grid\_series"}.
+\item A single file that happens to match that same \texttt{\_YYYY[\_MM]}
+  pattern but has no siblings (e.g.\ a baseline file literally named
+  \texttt{aci\_temp\_1961\_1990.nc}) is \emph{not} treated as a series --
+  it keeps its full name and \texttt{kind="grid"}.
+\end{itemize}
+
+When in doubt, do not guess a name -- call \texttt{aci\_lib.list\_datasets()}
+and filter/search the \texttt{name} column.
+
+%======================================================================
+\section{Common recipes}
+%======================================================================
+
+\subsection{Plot a national time series}
+
+\begin{lstlisting}
+import matplotlib.pyplot as plt
+
+df = aci_lib.load("anomalias_colombia/anomalies_temperature_combined")
+df = df.sort_values(["year", "month"])
+plt.plot(range(len(df)), df["t_90"])
+plt.title("National T90 anomaly, monthly")
+plt.show()
+\end{lstlisting}
+
+\subsection{Pull one month out of a gridded series}
+
+\begin{lstlisting}
+grid = aci_lib.load("anomalias_colombia/anomalies_temperature")
+first_month = grid.isel(file=0)   # already chronologically first
+first_month["t_90"].plot()
+\end{lstlisting}
+
+\subsection{Compare the same variable across regions}
+
+\begin{lstlisting}
+regions = ["antioquia", "cali", "colombia", "cundinamarca_bogota", "valle_cauca"]
+series = {
+    r: aci_lib.load(f"anomalias_{r}/anomalies_temperature_combined")
+    for r in regions
+}
+\end{lstlisting}
+
+\subsection{Only browse what is small/tabular first}
+
+Gridded datasets can be gigabytes; when exploring interactively, start
+with \texttt{kind="tabular"} to avoid triggering large lazy loads by
+accident:
+
+\begin{lstlisting}
+aci_lib.list_datasets(kind="tabular")
+\end{lstlisting}
+
+%======================================================================
+\section{Performance notes}
+\label{sec:perf}
+%======================================================================
+
+\begin{itemize}[leftmargin=*]
+\item \texttt{grid\_series} datasets are opened with dask chunking (one
+  chunk per source file) and are \emph{lazy}: \texttt{aci\_lib.load(...)}
+  itself does not read the underlying data into memory. Values are only
+  computed when you call \texttt{.values}, \texttt{.compute()}, or plot.
+\item Subset (\texttt{.isel}/\texttt{.sel}) before triggering computation,
+  not after -- e.g.\ \texttt{grid.isel(file=0)["t\_90"].plot()} reads one
+  file's worth of data; \texttt{grid["t\_90"].values} reads all of them.
+\item \texttt{list\_datasets()} and \texttt{describe()} only walk the
+  directory tree and match filenames -- they never open a data file, so
+  they are cheap to call repeatedly.
+\end{itemize}
+
+%======================================================================
+\section{Troubleshooting}
+%======================================================================
+
+\begin{longtable}{@{}L{5.4cm}L{8.6cm}@{}}
+\toprule
+\textbf{Symptom} & \textbf{Fix} \\
+\midrule
+\endhead
+\texttt{FileNotFoundError: Could not find data/processed/} & No data source configured yet -- follow \Cref{sec:data-supply}. \\
+\texttt{KeyError: No dataset named ...} & The name does not match the catalog exactly (case-sensitive, no leading/trailing \texttt{.csv}). Run \texttt{aci\_lib.list\_datasets()} and search/filter its \texttt{name} column instead of guessing. \\
+\texttt{ModuleNotFoundError: No module named 'xarray'} (or \texttt{dask}, \texttt{netCDF4}) & Only triggered when loading a NetCDF dataset. Install the missing package -- not needed at all if you only load tabular datasets. \\
+\texttt{load()} on a \texttt{grid\_series} is slow or uses a lot of memory & You likely triggered a full compute on an unsubsetted dataset -- see \Cref{sec:perf}. \\
+Colab session restarted / variables gone & \texttt{sys.path}, \texttt{aci\_lib}'s configured data directory, and any Drive mount are session state -- re-run the setup cells at the top of the notebook. \\
+\bottomrule
+\end{longtable}
+
+%======================================================================
+\section{Running the Colab notebook end to end}
+\label{sec:notebook}
+%======================================================================
+
+\texttt{notebooks/aci\_lib\_quickstart.ipynb} is organized to be run
+top to bottom:
+
+\begin{enumerate}[leftmargin=*]
+\item \textbf{Colab detection} -- a small cell sets \texttt{IN\_COLAB} so
+  the rest of the notebook behaves correctly whether it is running in
+  Colab or from a local checkout.
+\item \textbf{Get the code} -- clones this repo (Colab) or adds the
+  sibling \texttt{../src} to \texttt{sys.path} (local).
+\item \textbf{Supply the data} -- Drive-mount cell is active by default;
+  the upload/unzip alternative is present but commented out. Edit the
+  \texttt{DATA\_DIR} path to match where you put your data.
+\item \textbf{Browse the catalog} -- calls \texttt{list\_datasets()} and
+  shows the first 20 rows.
+\item \textbf{Load examples} -- one tabular dataset, one gridded series,
+  and a plot of the first month in that series.
+\item \textbf{Reference} -- pointers to \texttt{describe()} and to
+  \texttt{ARCHITECTURE.pdf} for pipeline-level context.
+\end{enumerate}
+
+Open it directly in Colab via the badge at the top of the notebook, or at:
+\url{https://colab.research.google.com/github/mdgordillob/aca_aci_collab/blob/main/notebooks/aci_lib_quickstart.ipynb}
+
+\end{document}
