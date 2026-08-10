@@ -465,20 +465,34 @@ instead copies (or symlinks) from an already-mounted
 \texttt{google.colab.drive}, which authenticates as whoever is logged into
 that Colab session.
 
-Its top-level \texttt{DEFAULT\_MAPPING} (\texttt{shapefiles},
-\texttt{salidas\_colombia}, \texttt{salidas\_cundinamarca\_bogota},
-\texttt{datos\_indice} $\to$ their \texttt{data/} equivalents) is confirmed
-against the real Drive listing. \texttt{era5/} is deliberately left out of
-the default mapping: it turned out not to be a flat folder of raw
-\texttt{.grib} files as first assumed, but its own tree
-(\texttt{completos/}, \texttt{Combined/}, \texttt{percentiles\_nc/},
-\texttt{Subsets para excel/}, \texttt{union/}, \texttt{ejemplo\_4\_73/},
-\texttt{otros/}), and which of those holds the flat
-\texttt{era5\_\{tmp,rain,wind\}\_<year>.grib} files the pipeline scripts
-expect is not yet confirmed -- see
+The full structure of \texttt{2. Datos} is now confirmed (via
 \texttt{notebooks/explore\_drive\_structure.ipynb} in the
-\texttt{aca\_aci\_collab} repo, a one-off Drive-tree dump built for exactly
-this.
+\texttt{aca\_aci\_collab} repo):
+\texttt{shapefiles/} is flat (48 files, matches \texttt{data/shapefiles/});
+\texttt{era5/completos/} is the flat raw archive (195 files,
+\texttt{era5\_\{rain,tmp,wind\}\_<year>.grib} -- exactly what
+\texttt{data/raw/era5/} expects); \texttt{era5/union/} and
+\texttt{era5/Combined/<date>/} hold Stage 1 merged-daily outputs
+(differently named, or date-versioned, respectively -- not a direct copy
+target); \texttt{era5/percentiles\_nc/<date>/} holds dated Stage 2
+baseline-percentile snapshots (names \emph{do} match
+\texttt{data/processed/} exactly, but picking ``current'' means picking a
+date); \texttt{salidas\_colombia/} and
+\texttt{salidas\_cundinamarca\_bogota/} are each a single \texttt{.zip},
+not a flat folder; and \texttt{datos\_indice/} is a dated personal archive
+(\texttt{2024-12/}, \texttt{2025-06/}, \texttt{2025-12/}) of
+\texttt{anomalias\_<region>} CSVs that doesn't map onto any one local
+directory.
+
+\texttt{DEFAULT\_MAPPING} accordingly only covers the three
+unambiguous cases -- \texttt{shapefiles}, \texttt{era5/completos}
+(nested-path keys work: \texttt{sync()} just \texttt{os.path.join}s them),
+and the two \texttt{salidas\_*} zips, which \texttt{sync()} detects and
+extracts automatically rather than copying the \texttt{.zip} itself. The
+dated/renamed subfolders (\texttt{union/}, \texttt{Combined/},
+\texttt{percentiles\_nc/}, \texttt{datos\_indice/}) are deliberately left
+out -- picking a date or renaming a file is a judgment call the module
+does not make for you; pass an explicit \texttt{mapping=} for those.
 
 \subsection{\texttt{aca\_opt\_benchmark.ipynb}}
 
