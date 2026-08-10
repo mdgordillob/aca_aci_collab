@@ -453,16 +453,29 @@ works without modification. This was verified by importing
 
 A new, small helper module (not part of \texttt{aci\_lib}) for pulling data
 out of the shared Google Drive folder (\Cref{sec:git-gap}) into this
-repo's \texttt{data/} layout, for use inside Colab. Anonymous fetching of
-that folder (tested with \texttt{gdown}) returns HTTP 401 despite being
-nominally link-shared -- likely an organizational sharing policy rather
-than a per-folder misconfiguration -- so \texttt{drive\_sync.sync(...)}
-instead copies (or symlinks) from an already-mounted
-\texttt{google.colab.drive}, which authenticates as whoever is logged into
-that Colab session. Its \texttt{DEFAULT\_MAPPING} (Drive subfolder name
-$\to$ local \texttt{data/} path) was read off the Drive UI's folder
-listing, not machine-verified against actual contents -- treat it as a
-starting point, not a guarantee.
+repo's \texttt{data/} layout, for use inside Colab. That folder
+(\texttt{My Drive/Indice Climatico Actuarial/2. Datos}, confirmed from the
+Drive UI) is shared with specific named collaborators, not ``anyone with
+the link'' -- confirmed from its ``Who has access'' panel, which is also
+why anonymous fetching (tested with \texttt{gdown}) returns HTTP 401. So
+\texttt{drive\_sync.sync(...)} instead copies (or symlinks) from an
+already-mounted \texttt{google.colab.drive}, which authenticates as
+whoever is logged into that Colab session.
+
+Its top-level \texttt{DEFAULT\_MAPPING} (\texttt{shapefiles},
+\texttt{salidas\_colombia}, \texttt{salidas\_cundinamarca\_bogota},
+\texttt{datos\_indice} $\to$ their \texttt{data/} equivalents) is confirmed
+against the real Drive listing. \texttt{era5/} is deliberately left out of
+the default mapping: it turned out not to be a flat folder of raw
+\texttt{.grib} files as first assumed, but its own tree
+(\texttt{completos/}, \texttt{Combined/}, \texttt{percentiles\_nc/},
+\texttt{Subsets para excel/}, \texttt{union/}, \texttt{ejemplo\_4\_73/},
+\texttt{otros/}), and which of those holds the flat
+\texttt{era5\_\{tmp,rain,wind\}\_<year>.grib} files the pipeline scripts
+expect is not yet confirmed -- see
+\texttt{notebooks/explore\_drive\_structure.ipynb} in the
+\texttt{aca\_aci\_collab} repo, a one-off Drive-tree dump built for exactly
+this.
 
 \subsection{\texttt{aca\_opt\_benchmark.ipynb}}
 
