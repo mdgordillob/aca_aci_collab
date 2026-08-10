@@ -538,6 +538,23 @@ The deprecated \texttt{.drop()} call itself is still there -- pinning
 works around the fragility, it doesn't fix it. Replacing it with
 \texttt{.drop\_vars()} would be a reasonable, separate follow-up.
 
+\subsection{\texttt{aca\_opt\_full\_replication.ipynb}}
+
+Scales \texttt{aca\_opt\_benchmark.ipynb} up from a 1-year smoke test to
+the real thing: fetches all \texttt{era5\_tmp\_<year>.grib} files
+(1961--2024) rather than one, runs Stage 1/2 over the actual 30-year
+1961--1990 baseline (not a 1-year proxy), Stage 3 over the full record,
+and then diffs the resulting \texttt{anomalies\_temperature\_combined.csv}
+against the official \texttt{salidas\_colombia} output already on Drive
+(fetched into a separate \texttt{\_official\_reference/} path so it can't
+be overwritten by the fresh computation) -- column-by-column max/mean
+absolute difference, not just a visual spot-check. Expected runtime is
+45--90 minutes (network fetch of $\sim$5.5\,GB plus compute); not
+something to run casually, but the strongest available evidence that
+\texttt{aca\_indice\_climatico\_opt} genuinely works as an importable
+library against Drive-sourced data end to end, not just for one
+hand-picked year.
+
 %======================================================================
 \section{Cleanup priorities (standing list)}
 %======================================================================
