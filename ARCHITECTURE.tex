@@ -454,13 +454,16 @@ works without modification. This was verified by importing
 A new, small helper module (not part of \texttt{aci\_lib}) for pulling data
 out of the shared Google Drive folder (\Cref{sec:git-gap}) into this
 repo's \texttt{data/} layout, for use inside Colab. That folder
-(\texttt{My Drive/Indice Climatico Actuarial/2. Datos}, confirmed from the
-Drive UI) is shared with specific named collaborators, not ``anyone with
-the link'' -- confirmed from its ``Who has access'' panel, which is also
-why anonymous fetching (tested with \texttt{gdown}) returns HTTP 401. So
-\texttt{drive\_sync.sync(...)} instead copies (or symlinks) from an
-already-mounted \texttt{google.colab.drive}, which authenticates as
-whoever is logged into that Colab session.
+(\texttt{My Drive/2. Datos}, confirmed from the Drive UI -- it is a
+shortcut sitting directly in \texttt{My Drive} root; ``Indice Climatico
+Actuarial'', seen in Drive's breadcrumb/location panel, is the owner's
+canonical path, not where the shortcut lives) is shared with specific
+named collaborators, not ``anyone with the link'' -- confirmed from its
+``Who has access'' panel, which is also why anonymous fetching (tested
+with \texttt{gdown}) returns HTTP 401. So \texttt{drive\_sync.sync(...)}
+instead copies (or symlinks) from an already-mounted
+\texttt{google.colab.drive}, which authenticates as whoever is logged into
+that Colab session.
 
 Its top-level \texttt{DEFAULT\_MAPPING} (\texttt{shapefiles},
 \texttt{salidas\_colombia}, \texttt{salidas\_cundinamarca\_bogota},
