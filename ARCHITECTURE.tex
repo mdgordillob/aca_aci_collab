@@ -425,6 +425,60 @@ kept out of scope to keep the catalog's grouping logic simple and its
 descriptions trustworthy.
 
 %======================================================================
+\section{Benchmarking the pipeline in Colab}
+\label{sec:benchmark}
+%======================================================================
+
+Unlike \texttt{aci\_lib} (read-only over already-computed
+\texttt{data/processed/}), this capability runs the actual pipeline
+\emph{stages} -- Stage 1 merge/resample, Stage 2 baseline percentiles,
+Stage 3 anomalies -- against raw ERA5 \texttt{.grib}, to see how long they
+take on whatever compute a given Colab session provides.
+
+\subsection{Why no script changes were needed}
+
+\texttt{unir\_archivos.py}, \texttt{calcular\_percentil\_temperatura.py},
+and \texttt{calcular\_anomalias\_temperatura.py} already expose plain,
+parameterized functions (\texttt{process\_yearly\_data\_tmp},
+\texttt{calcular\_percentiles}, \texttt{procesar\_anomalias\_temperatura},
+\dots) behind a thin \texttt{\_\_main\_\_} CLI wrapper that just supplies
+default repo-relative paths. \textbf{They were already importable as a
+library} -- calling them directly from a notebook with explicit paths
+works without modification. This was verified by importing
+\texttt{unir\_archivos} and timing
+\texttt{process\_yearly\_precipitation\_data} against a real local
+\texttt{.grib} file before writing the Colab notebook described below.
+
+\subsection{\texttt{src/drive\_sync.py}}
+
+A new, small helper module (not part of \texttt{aci\_lib}) for pulling data
+out of the shared Google Drive folder (\Cref{sec:git-gap}) into this
+repo's \texttt{data/} layout, for use inside Colab. Anonymous fetching of
+that folder (tested with \texttt{gdown}) returns HTTP 401 despite being
+nominally link-shared -- likely an organizational sharing policy rather
+than a per-folder misconfiguration -- so \texttt{drive\_sync.sync(...)}
+instead copies (or symlinks) from an already-mounted
+\texttt{google.colab.drive}, which authenticates as whoever is logged into
+that Colab session. Its \texttt{DEFAULT\_MAPPING} (Drive subfolder name
+$\to$ local \texttt{data/} path) was read off the Drive UI's folder
+listing, not machine-verified against actual contents -- treat it as a
+starting point, not a guarantee.
+
+\subsection{\texttt{aca\_opt\_benchmark.ipynb}}
+
+Lives in the \texttt{aca\_aci\_collab} companion repo's
+\texttt{notebooks/}, alongside \texttt{aci\_lib\_quickstart.ipynb}, but
+clones \emph{this} pipeline repo rather than the companion repo, since
+that's what has the scripts to benchmark. It fetches one year of raw
+temperature \texttt{.grib} (not the whole $\sim$13\,GB archive) and times
+Stages 1--3 against just that year, then extrapolates linearly to a full
+1961--2024 (64-year) run for Stages 1 and 3. Stage 2 (baseline percentiles)
+is timed against the same single year purely as a computational-shape
+proxy -- the real pipeline computes it once over the fixed 30-year
+1961--1990 baseline, not once per year, so its extrapolated figure isn't
+meaningful; multiply the single-year Stage 2 time by roughly 30 instead.
+
+%======================================================================
 \section{Cleanup priorities (standing list)}
 %======================================================================
 

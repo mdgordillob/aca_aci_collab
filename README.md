@@ -12,7 +12,8 @@ top of it.
 |---|---|
 | [`src/aci_lib/`](src/aci_lib/) | The library: catalogs `data/processed/` and loads any entry into a `pandas.DataFrame` or `xarray.Dataset` with one function call. |
 | [`notebooks/aci_lib_quickstart.ipynb`](notebooks/aci_lib_quickstart.ipynb) | Runs end-to-end in Colab: clone this repo, point `aci_lib` at your data, browse the catalog, load and plot two example datasets. |
-| [`USAGE.pdf`](USAGE.pdf) | How-to: setup, full API reference, dataset naming conventions, recipes, troubleshooting. |
+| [`notebooks/aca_opt_benchmark.ipynb`](notebooks/aca_opt_benchmark.ipynb) | Clones the *pipeline* repo instead and actually **runs** three of its stages (merge/resample, baseline percentiles, anomalies) against one year of raw ERA5 fetched from Drive, timing each -- see how the pipeline performs on Colab's hardware. `ARCHITECTURE.pdf` §9 explains why no pipeline code changes were needed. |
+| [`USAGE.pdf`](USAGE.pdf) | How-to: setup, full API reference, dataset naming conventions, recipes, troubleshooting (for `aci_lib`; the benchmark notebook is self-documented in its own cells). |
 | [`ARCHITECTURE.pdf`](ARCHITECTURE.pdf) | Why: the ACI-CO methodology and the pipeline that produced the data this repo reads. |
 
 **Not here:** the data itself. `data/processed/` from the source ACI-CO
@@ -53,4 +54,8 @@ A backup of the raw ERA5 `.grib` downloads that feed the earliest pipeline
 stage (before percentiles/anomalies/`data/processed/` even exist) is kept
 on [Google Drive](https://drive.google.com/drive/folders/17SdbsxVJYnqjPzIlS4FFZ6MowfMcHfqW) --
 see `ARCHITECTURE.pdf` §4 for where that fits in the data flow. `aci_lib`
-itself does not read `.grib` files; it only reads `data/processed/`.
+itself does not read `.grib` files; it only reads `data/processed/`. The
+pipeline repo's `src/drive_sync.py` (used by `aca_opt_benchmark.ipynb`
+above) is what actually fetches from that Drive folder, via a mounted
+`google.colab.drive` rather than an anonymous link -- anonymous access
+returns HTTP 401 despite the folder being nominally link-shared.
