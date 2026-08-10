@@ -508,6 +508,36 @@ proxy -- the real pipeline computes it once over the fixed 30-year
 1961--1990 baseline, not once per year, so its extrapolated figure isn't
 meaningful; multiply the single-year Stage 2 time by roughly 30 instead.
 
+\subsection{Verified: Colab and local produce identical results (with
+one caveat)}
+
+Run end-to-end against real Drive data (2026-08-10, year 1985): Stage 1
+took 31.8s in Colab vs.\ 22.1s locally, Stage 2 11.7s vs.\ 8.8s, Stage 3
+30.8s vs.\ 26.6s -- different hardware, same order of magnitude. More
+importantly, \textbf{the computed \texttt{t\_90}/\texttt{t\_10} anomaly
+values matched bit-for-bit} between the two runs ($-0.436035$ /
+$-0.737441$ for December 1985, identical \texttt{NaN} pattern for the
+other 11 months).
+
+One real discrepancy surfaced in that comparison: an earlier, unpinned
+version of the Colab dependency-install cell let \texttt{pip} resolve
+\texttt{xarray==2026.7.0}, versus this repo's pinned
+\texttt{xarray==2024.11.0} -- and the Colab run's output CSV was silently
+missing the \texttt{count\_hot}/\texttt{count\_cold} columns entirely (no
+error, no warning). The likely cause:
+\texttt{calcular\_anomalias\_temperatura.py}'s
+\texttt{drop\_unnecessary\_coords()} calls the long-deprecated
+\texttt{DataArray.drop()}, whose variable-vs-coordinate dispatch behavior
+has shifted across that version gap. \texttt{aca\_opt\_benchmark.ipynb}'s
+install cell now pins every relevant package to this repo's
+\texttt{requirements.txt} versions
+(\texttt{xarray==2024.11.0}, \texttt{cfgrib==0.9.14.1},
+\texttt{rioxarray==0.18.2}, \texttt{geopandas==1.0.1},
+\texttt{netCDF4==1.7.2}, \texttt{eccodes==2.39.1}), which resolved it.
+The deprecated \texttt{.drop()} call itself is still there -- pinning
+works around the fragility, it doesn't fix it. Replacing it with
+\texttt{.drop\_vars()} would be a reasonable, separate follow-up.
+
 %======================================================================
 \section{Cleanup priorities (standing list)}
 %======================================================================
