@@ -654,6 +654,26 @@ against the original per-region code path (year 1985, Colombia, both
 temperature and wind) before shipping -- same values, roughly a 4x
 reduction in redundant decode work.
 
+\subsection{Stage 1 had no parallelism at all -- an oversight, not a
+hardware limit}
+
+Separately from the region-level redundancy above,
+\texttt{aca\_opt\_multi\_region\_monthly.ipynb}'s (and
+\texttt{aca\_opt\_full\_replication.ipynb}'s) Stage 1 originally processed
+its 30 baseline years in a plain sequential \texttt{for} loop --
+\texttt{unir\_archivos.py}'s three \texttt{process\_yearly\_*\_data}
+functions have no cross-year dependency (each year writes a uniquely
+named intermediate file, unlike drought's CDD in
+\Cref{sec:cdd-race}), so this was safely, trivially parallelizable and
+simply wasn't. This alone accounted for roughly 30 of the multi-region
+notebook's total minutes. Fixed by parallelizing over years with the same
+\texttt{multiprocessing.Pool} pattern used elsewhere -- named top-level
+task functions per variable, since \texttt{Pool} pickles tasks to send to
+worker processes (even under Colab's \texttt{fork} start method) and
+lambdas aren't picklable. Verified with real \texttt{Pool} execution (not
+just reasoning about it) against 6 real years of local data: 34.2s
+parallel vs.\ $\sim$132s sequential, all 6 output files correct.
+
 \subsection{Precipitation/drought: a real correctness hazard, not just a
 performance gap}
 \label{sec:cdd-race}
