@@ -729,6 +729,72 @@ open multiprocessing-correctness question from \Cref{sec:reproducibility}
 drift, specific to temperature) is unaffected by any of this and remains
 open regardless of which version of this notebook is run.
 
+\subsection{Rendering \texttt{article1.tex} inline}
+
+A cell in \texttt{aca\_opt\_multi\_region\_monthly.ipynb} compiles
+\texttt{articles/aci\_co\_submission/article1.tex} -- the authoritative
+methodology paper (\Cref{sec:aci-co-target}), \emph{not} the superseded
+root-level \texttt{articles/article1.tex} -- and embeds the resulting PDF
+inline via a base64 data URI, rather than just offering it for download.
+This only works because that file (and its figures under
+\texttt{graficas/paper\_figures/}) is actually tracked in git -- confirmed
+before building this, since \texttt{ARCHITECTURE.md}'s git-tracking-gap
+section originally listed all of \texttt{articles/aci\_co\_submission/} as
+untracked; that changed once the pending local commits were pushed
+(\Cref{sec:git-gap}). \texttt{article1.tex} uses a hand-written
+\texttt{thebibliography} block, not \texttt{natbib}+\texttt{bibtex}+a
+separate \texttt{.bib} file, so two \texttt{pdflatex} passes (for
+cross-references/TOC) compile it with no \texttt{bibtex}/\texttt{biber}
+step needed -- confirmed by compiling it locally (53 pages, no undefined
+references, no LaTeX errors) before writing the notebook cell.
+
+\subsection{Daily vs.\ monthly: a cross-validation, not just a resolution
+comparison}
+
+\texttt{produce\_daily\_anomalies.py} (daily, DOY-bootstrap thresholds,
+following \texttt{run\_aci\_colombia.py}'s algorithm) and
+\texttt{calcular\_anomalias\_temperatura.py} (monthly, calendar-month
+thresholds, the OPT pipeline used everywhere else in this notebook) are
+\textbf{two independently-implemented pipelines} kept in sync specifically
+to cross-check each other (\Cref{sec:git-gap} on
+\texttt{run\_aci\_colombia.py}'s original purpose), not two resolutions of
+the same computation. A new notebook section compares them properly:
+
+\begin{itemize}[leftmargin=*]
+\item Reuses \texttt{run\_aci\_colombia.py}'s per-year
+  \emph{preprocessing} functions only (\texttt{preprocess\_temperature\_-
+  year} etc.) -- not its full two-phase pipeline -- against the same raw
+  grib already fetched for the OPT pipeline, avoiding a second download.
+  Verified against real local data (1961--1962): both years' temperature,
+  wind, and rain preprocessing completed correctly ($\sim$88s/year for all
+  three variables combined).
+\item Compares \textbf{unstandardized} exceedance fractions -- the OPT
+  pipeline's \texttt{count\_hot} column against the daily pipeline's
+  \texttt{T90} resampled to a monthly mean -- not the \emph{standardized}
+  \texttt{t\_90} column used everywhere else in this notebook, which is
+  not on the same scale as either.
+\item Scoped to Colombia, temperature only, the 1961--1990 baseline (the
+  DOY thresholds need it) plus a configurable \texttt{COMPARISON\_YEARS}
+  (default: 2020--2024) -- widening it costs preprocessing time linearly.
+\item \texttt{produce\_daily\_anomalies.py}'s own \texttt{doy\_percentile}
+  computes each of the 366 day-of-year thresholds as a separate
+  \texttt{.isel()}/\texttt{.quantile()} xarray call -- measured at
+  \textbf{150s for one of the four calls needed, on just a 2-year test
+  subset} (would be far worse against the real 30-year baseline). A
+  functionally-identical numpy rewrite (same day-of-year windowing logic,
+  \texttt{np.percentile} instead of 366 separate xarray operations) measured
+  \textbf{1.6s} on the same input -- a 92x speedup, with a $1.83\times
+  10^{-5}$ max difference (floating-point-level, from a different default
+  interpolation method, not a real disagreement). The notebook uses this
+  faster version, defined locally in the cell -- \texttt{produce\_daily\_-
+  anomalies.py} itself is unchanged, since this is a notebook-side
+  convenience, not a pipeline correctness fix. The full chain (fast
+  thresholds $\to$ \texttt{region\_mask} $\to$
+  \texttt{compute\_t90\_t10\_daily} $\to$ \texttt{spatial\_mean}) was
+  verified end-to-end against real local data before shipping: 6.9s for
+  all four thresholds, sensible T90 values in the expected $[0,1]$ range.
+\end{itemize}
+
 %======================================================================
 \section{Cleanup priorities (standing list)}
 %======================================================================
