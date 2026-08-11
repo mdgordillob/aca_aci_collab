@@ -607,6 +607,66 @@ pre-existing repo quirks, not new bugs:}
   scripts would be a reasonable, separate follow-up.
 \end{itemize}
 
+\textbf{A third issue found this way was an actual bug, not a quirk, and
+was fixed in the source (not worked around):}
+\texttt{calcular\_anomalias\_lluvia.py}'s \texttt{process\_year()} selected
+a year's grib file with \texttt{[f for f in files if str(year) in f and
+f.endswith(".grib")][0]} -- no variable-name filter, unlike
+\texttt{calcular\_anomalias\_temperatura.py} and
+\texttt{calcular\_anomalias\_viento.py}, which both filter further
+(\texttt{"tmp" in f} / \texttt{"wind" in f}). As long as
+\texttt{data/raw/era5/} held only rain grib this never mattered; once this
+notebook fetched all three variables into one directory, it started
+picking temperature or wind files for most years, failing with
+\texttt{"No variable named 'tp'"}. Caught live during an actual Colab run
+(2026-08-11); the missing \texttt{"rain" in f} filter was added directly
+to the script (matching the existing pattern in the other two), verified
+against real data before pushing. The already-published
+\texttt{salidas\_colombia} reference was unaffected (768/768 rows present,
+confirmed by row count) -- it was evidently computed back when
+\texttt{data/raw/era5/} held only rain grib, before temperature/wind were
+added.
+
+\subsection{Performance: decode raw grib once per year, not once per
+region}
+
+The first version of this notebook called
+\texttt{procesar\_anomalias\_region()} once per region, and each call
+independently re-decoded the same raw grib from scratch -- 4 regions
+$\times$ 3 variables $\times$ 64 years = 768 redundant grib-decode passes,
+identical until the final shapefile clip -- understandably frustrating
+given how long a run was taking, since multiprocessing across years does
+not fix redundant work, and GPU/TPU runtimes provide \emph{zero} benefit
+here (nothing in this stack -- \texttt{xarray}/\texttt{cfgrib}/
+\texttt{pandas} -- is CUDA-aware).
+
+Temperature and wind both expose a clean split --
+\texttt{load\_annual\_grid\_data} / \texttt{load\_annual\_grid\_data\_safe}
+take an \emph{optional} \texttt{shapefile\_path}, decoding unclipped data
+when it's \texttt{None} -- so the notebook now decodes each year once and
+clips that one decode to all 4 regions via plain \texttt{rioxarray}
+(\texttt{.rio.write\_crs(...).rio.clip(...)}), calling
+\texttt{calcular\_anomalias}/\texttt{calcular\_anomalias\_viento} per
+region-month against the shared decode. Multiprocessing still parallelizes
+over years (unchanged from before), so this combines with, not replaces,
+the existing 7-worker parallelism. \textbf{Verified bit-for-bit identical}
+against the original per-region code path (year 1985, Colombia, both
+temperature and wind) before shipping -- same values, roughly a 4x
+reduction in redundant decode work.
+
+Precipitation/drought is \textbf{not} sped up the same way:
+\texttt{calcular\_anomalias\_lluvia.py}'s \texttt{load\_grid\_data} takes
+\texttt{shapefile} as a required argument with no \texttt{None} path,
+clipping unconditionally inside the load -- splitting decode from clip
+there would mean editing that function's contract, not just calling it
+differently, and was left as a separate, not-yet-done follow-up rather
+than rushed alongside everything else in this session.
+
+This changes performance only, not the underlying computation -- the
+open multiprocessing-correctness question from \Cref{sec:reproducibility}
+is unaffected by this change and remains open regardless of which version
+of this notebook is run.
+
 %======================================================================
 \section{Cleanup priorities (standing list)}
 %======================================================================
