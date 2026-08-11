@@ -795,6 +795,44 @@ the same computation. A new notebook section compares them properly:
   all four thresholds, sensible T90 values in the expected $[0,1]$ range.
 \end{itemize}
 
+\subsection{Drive-backed result caching, raw-grib access, and loading
+outputs back}
+
+Every restart this session re-ran Stage 1/2 (the 1961--1990 baseline
+merge/percentiles) from scratch -- $\sim$20--30 minutes each time, for
+outputs identical across runs regardless of which regions or
+\texttt{COMPARISON\_YEARS} Stage 3 uses. Three additions address this and
+two adjacent, explicitly-requested needs:
+
+\begin{itemize}[leftmargin=*]
+\item \textbf{Caching} (\texttt{drive\_sync.cache\_upload}/
+  \texttt{cache\_restore}/\texttt{cache\_complete}, verified locally --
+  empty-cache detection, upload, complete-cache detection, restore into a
+  fresh directory, partial-cache correctly reported as incomplete):
+  deliberately \textbf{file-list-based, not whole-folder}, and
+  deliberately scoped to \emph{only} the 8 small, stable Stage 1/2
+  baseline files -- \emph{not} Stage 3's per-region output, where this
+  session's still-open correctness questions live
+  (\Cref{sec:reproducibility}, \Cref{sec:cdd-race}). Caching those
+  silently would risk reusing something still being debugged. Defaults to
+  the user's own \texttt{My Drive} space, not the shared \texttt{2. Datos}
+  team folder -- writing generated cache files into shared storage by
+  default, without teammates expecting them, isn't something to do
+  unprompted.
+\item \textbf{Raw grib access} (\texttt{load\_raw\_grib()}): a thin
+  wrapper around \texttt{xr.open\_dataset(..., engine="cfgrib")} plus
+  optional shapefile clipping, for exploration outside the fixed
+  pipeline -- verified against real data, both unclipped (71$\times$68
+  full extent) and clipped to a small region (Valle del Cauca, correctly
+  reduced to 8$\times$6).
+\item \textbf{Loading outputs for further analysis}: rather than
+  reimplementing a browse/load layer, the notebook clones
+  \texttt{aca\_aci\_collab} and points \texttt{aci\_lib}
+  (\Cref{sec:aci-lib}) directly at the session's own
+  \texttt{data/processed/} -- what gets loaded is what this run just
+  computed, not a separately-fetched copy.
+\end{itemize}
+
 %======================================================================
 \section{Cleanup priorities (standing list)}
 %======================================================================
