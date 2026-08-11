@@ -654,18 +654,60 @@ against the original per-region code path (year 1985, Colombia, both
 temperature and wind) before shipping -- same values, roughly a 4x
 reduction in redundant decode work.
 
-Precipitation/drought is \textbf{not} sped up the same way:
-\texttt{calcular\_anomalias\_lluvia.py}'s \texttt{load\_grid\_data} takes
-\texttt{shapefile} as a required argument with no \texttt{None} path,
-clipping unconditionally inside the load -- splitting decode from clip
-there would mean editing that function's contract, not just calling it
-differently, and was left as a separate, not-yet-done follow-up rather
-than rushed alongside everything else in this session.
+\subsection{Precipitation/drought: a real correctness hazard, not just a
+performance gap}
+\label{sec:cdd-race}
 
-This changes performance only, not the underlying computation -- the
+Precipitation is \emph{not} sped up the same decode-once way temperature
+and wind are, and drought could not safely be either, for a reason more
+serious than "not yet done":
+\texttt{calcular\_anomalias\_lluvia.py}'s \texttt{calcular\_interpolacion()}
+(the CDD/drought calculation) reads the \textbf{previous year's} saved
+\texttt{datos\_maximos\_\{year-1\}.nc} to compute the current year's value,
+and writes its own for the next year -- a sequential, year-over-year
+dependency. \texttt{procesar\_anomalias\_lluvia()}'s own default is
+\texttt{use\_multiprocessing=True}, parallelizing over years via
+\texttt{multiprocessing.Pool} -- which does not guarantee execution order.
+Any year whose predecessor has not yet been written when it runs silently
+falls back to a cruder approximation (\texttt{except FileNotFoundError}
+in \texttt{calcular\_interpolacion}) instead of the proper interpolation.
+\textbf{This is a pre-existing risk in this script's own default
+behavior, not something introduced by this notebook} -- and it is
+plausible, not yet confirmed, that some official reference output was
+affected, since \texttt{use\_multiprocessing=True} is the default a plain
+call would use.
+
+(\texttt{load\_grid\_data}'s \texttt{shapefile} parameter was still made
+properly optional -- its docstring already said "if a shapefile is
+provided, clips the data," but the implementation clipped unconditionally
+with no \texttt{None} guard. That part was a real, narrow, worth-fixing
+gap; the CDD ordering issue is a different, larger one.)
+
+Given that, \texttt{aca\_opt\_multi\_region\_monthly.ipynb} parallelizes
+precipitation/drought across \textbf{regions} instead of years: each
+region gets its own worker process running
+\texttt{procesar\_anomalias\_lluvia(..., use\_multiprocessing=False)} --
+sequential and therefore correct within that region -- with up to 4
+regions running concurrently. Real parallelism (up to 4x, one region per
+core) without touching the ordering question above. Verified by calling
+the worker function directly (not through \texttt{Pool}, since Windows'
+\texttt{spawn} multiprocessing model does not reliably reflect Colab's
+Linux \texttt{fork} model for local testing) against two regions --
+distinct, plausible output for both, no cross-region collisions.
+
+This leaves the CDD ordering issue itself unresolved -- a legitimate
+follow-up would be making \texttt{calcular\_interpolacion} not depend on
+sequential file I/O at all (e.g.\ computing each year's raw dry-day count
+independently and doing the cross-year blend as a separate, explicitly
+ordered pass), which is a real redesign, not something to bundle into a
+performance-motivated notebook change.
+
+This changes performance only for temperature/wind, and the region- vs.\
+year-level parallelization choice only for precipitation/drought -- the
 open multiprocessing-correctness question from \Cref{sec:reproducibility}
-is unaffected by this change and remains open regardless of which version
-of this notebook is run.
+(the \texttt{count\_hot}/\texttt{count\_cold} and \texttt{t\_90}/\texttt{t\_10}
+drift, specific to temperature) is unaffected by any of this and remains
+open regardless of which version of this notebook is run.
 
 %======================================================================
 \section{Cleanup priorities (standing list)}
