@@ -750,6 +750,7 @@ references, no LaTeX errors) before writing the notebook cell.
 
 \subsection{Daily vs.\ monthly: a cross-validation, not just a resolution
 comparison}
+\label{sec:daily-vs-monthly}
 
 \texttt{produce\_daily\_anomalies.py} (daily, DOY-bootstrap thresholds,
 following \texttt{run\_aci\_colombia.py}'s algorithm) and
@@ -819,6 +820,20 @@ two adjacent, explicitly-requested needs:
   team folder -- writing generated cache files into shared storage by
   default, without teammates expecting them, isn't something to do
   unprompted.
+\item \textbf{Caching gap closed}: the caching above only covered the OPT
+  pipeline's Stage 1/2 baseline -- \Cref{sec:daily-vs-monthly}'s
+  \texttt{aci\_daily/} preprocessing (a separate intermediate format
+  nothing else uses) was still unconditionally recomputing all 35 years
+  (30 baseline + 5 \texttt{COMPARISON\_YEARS}) every run, $\sim$50 minutes,
+  even after the baseline caching above was added. Fixed with the same
+  primitives, scoped separately and \textbf{per year} rather than
+  all-or-nothing: whichever years were preprocessed in \emph{any} previous
+  run are restored and skipped (via the existing per-file
+  \texttt{if not exists} check inside the preprocessing task, unchanged),
+  only genuinely new years cost anything. Verified with a synthetic
+  cache-then-restore-then-compute-then-upload test (2 pre-cached years
+  correctly restored and skipped, 1 new year correctly computed, all 9
+  resulting files correctly persisted) before shipping.
 \item \textbf{Raw grib access} (\texttt{load\_raw\_grib()}): a thin
   wrapper around \texttt{xr.open\_dataset(..., engine="cfgrib")} plus
   optional shapefile clipping, for exploration outside the fixed
