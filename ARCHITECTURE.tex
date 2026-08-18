@@ -848,6 +848,86 @@ two adjacent, explicitly-requested needs:
   computed, not a separately-fetched copy.
 \end{itemize}
 
+\subsection{\texttt{count\_hot}/\texttt{count\_cold} dilution bug (found
+via \Cref{sec:daily-vs-monthly}, fixed in the pipeline)}
+\label{sec:count-hot-dilution}
+
+The daily-vs-monthly comparison (\Cref{sec:daily-vs-monthly}) surfaced a
+persistent $\sim2\times$ gap between the two pipelines' unstandardized T90
+fraction that did \emph{not} shrink or vanish under several hypotheses
+tested against real local data: neither a DOY-window/leap-year artifact,
+nor \texttt{produce\_daily\_anomalies.py}'s use of a 10pm--6am
+\texttt{night\_max} window instead of article1.tex's true daily-minimum
+TN90p (confirmed as a genuine definitional difference from the paper, but
+recomputing with the correct full-day min made no difference to the gap),
+nor \texttt{region\_mask()}'s \texttt{all\_touched=True} clipping parameter
+(changes the result by $<2\%$), nor a stale cached \texttt{aci\_daily}
+file (byte-identical to a fresh regeneration).
+
+The actual cause: \texttt{calcular\_anomalias\_temperatura.py}'s
+\texttt{calcular\_anomalias()} clips to Colombia via
+\texttt{shape.rio.clip(..., drop=True)}, which crops to the shapefile's
+\emph{bounding box}, not its polygon -- for January, the cropped grid has
+3{,}283 cells but only 1{,}493 are actually inside Colombia (the rest are
+Pacific/Caribbean ocean and Venezuela/Panama/Ecuador/Brazil border padding,
+\texttt{NaN} in the temperature data). The line
+\texttt{count\_above\_90\_max = (daily\_max > percentile\_90\_max)}
+\texttt{.astype(int)} then silently destroys that: \texttt{NaN > x}
+evaluates to \texttt{False} under IEEE754, and \texttt{.astype(int)} turns
+that \texttt{False} into a real \texttt{0}, indistinguishable from "inside
+Colombia, didn't exceed." The final
+\texttt{anomalies.mean(dim=['latitude','longitude'])} then divides by the
+full padded box (3{,}283) instead of the true polygon (1{,}493) --
+diluting \texttt{count\_hot}/\texttt{count\_cold} by roughly that ratio
+($\approx 2.2\times$). \texttt{calcular\_anomalias\_viento.py}'s
+\texttt{compute\_occurrences()} (WP's raw exceedance count) has the
+identical pattern.
+
+Verified with real data before concluding this was the cause (not just
+plausible): the raw hourly grib values, the full-month gridded
+\texttt{day\_max}, and the P90 thresholds were all confirmed
+\textbf{bit-for-bit identical} between the two pipelines (zero difference,
+checked cell-by-cell across the whole grid) -- ruling out any data or
+threshold discrepancy. Recomputing OPT's January 2020 TX90p by hand,
+correctly restricted to only the 1{,}493 real Colombia cells, reproduced
+the daily pipeline's $\approx 0.39$, not OPT's diluted $0.175$. So the
+daily pipeline's numbers were correct all along; \texttt{count\_hot} was
+the one silently wrong.
+
+\textbf{The standardized columns are unaffected}, for a reason grounded in
+the code rather than a coincidence: \texttt{t\_90}/\texttt{t\_10}
+(\texttt{anomalies\_above\_max} etc.) get their \texttt{NaN} mask from
+\texttt{mean\_max}/\texttt{std\_dev\_max} -- computed by
+\texttt{calcular\_percentil\_temperatura.py} per grid cell, never spatially
+collapsed, and clipped \emph{separately} from the count arrays -- so they
+were already correctly excluding out-of-polygon cells regardless of the
+count-dilution bug. Confirmed directly: recomputing Jan 2020 after the fix
+gives \texttt{t\_90 = 2.781}, \texttt{t\_10 = -0.8136} -- bit-identical to
+the pre-fix values -- while \texttt{count\_hot} moves from $0.1988$ to
+$0.4373$ (matching the daily pipeline's independently-computed $0.4373$
+almost exactly) and \texttt{count\_cold} from $0.0153$ to $0.0337$. Since
+the ACI-CO composite and article1.tex's headline results are built from the
+standardized columns, they are not expected to change from this fix; only
+the raw \texttt{count\_hot}/\texttt{count\_cold}/\texttt{count\_above}
+columns (and anything reading them directly, like the notebook's \S10
+comparison) were wrong.
+
+\textbf{Fix}: both scripts' exceedance-count computation was changed from
+\texttt{.astype(int)} to \texttt{xr.where(cond, 1.0, 0.0).where(source.-}
+\texttt{notnull())}, preserving \texttt{NaN} through to the final spatial
+mean so \texttt{skipna=True} (xarray's default) correctly excludes
+out-of-polygon cells. This is a source-code fix in the pipeline repo, not a
+notebook workaround -- the multi-region notebook imports these functions
+directly (\texttt{import calcular\_anomalias\_temperatura as m; m.-}
+\texttt{calcular\_anomalias(...)}), so it inherits the fix automatically on
+its next run without any notebook change. One consequence: the
+\texttt{salidas\_*} official reference on Drive (\Cref{sec:daily-vs-monthly}'s
+\S8b comparison) predates this fix, so a fresh run will show
+\texttt{count\_hot}/\texttt{count\_cold}/\texttt{count\_above} diverging
+from that reference by the old $\sim2.2\times$ factor until the reference
+is regenerated -- \texttt{t\_90}/\texttt{t\_10}/\texttt{anomalies\_above}
+should still match closely, as before.
+
 %======================================================================
 \section{Cleanup priorities (standing list)}
 %======================================================================
