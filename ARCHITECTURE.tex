@@ -1033,6 +1033,57 @@ pipeline} -- it exists purely to let the tool's claims be checked
 directly in an environment (Colab, with a real GPU) that can actually
 run it, something neither this machine nor Claude could do first.
 
+\subsection{Raw-grib transfer: many small files vs.\ one archive}
+\label{sec:raw-archive-cache}
+
+Prompted by a Reddit thread the user linked directly --
+\href{https://www.reddit.com/r/MachineLearning/comments/sxui5r/}{r/Machine-
+Learning, "Best way to transfer large datasets to Colab"} -- whose OP hit
+an identical symptom to this project's own earlier "way too slow"
+complaints: "Took me an hour just to glob through which files were in
+google drive." Their own resolution, echoed by several top comments
+(\texttt{seba07}, \texttt{somnet}, \texttt{Schorsi}): zip the dataset
+once, transfer the single archive, unzip locally -- copying many small
+files off a mounted Drive pays large per-file overhead that a single
+larger transfer avoids.
+
+\S3's fetch of \texttt{era5/completos} was exactly the pattern being
+warned about: 195 loose \texttt{.grib} files, each copied individually
+via \texttt{shutil.copy} in a loop. Unlike \texttt{salidas\_colombia}/
+\texttt{salidas\_cundinamarca\_bogota} (already single \texttt{.zip}s on
+Drive, already auto-extracted by \texttt{sync()}), the raw archive had no
+single-file fast path at all -- and, unlike the Stage 1/2 baseline
+caching (\Cref{sec:daily-vs-monthly}'s caching-gap discussion), this
+fetch runs on effectively \emph{every} session, since it's raw input, not
+cacheable derived output.
+
+\texttt{drive\_sync.archive\_and\_cache\_raw()}/\texttt{restore\_raw\_-
+archive()} apply the same fix as the existing baseline cache, adapted for
+many-small-files: zip \emph{locally} (fast -- local disk, no
+network-mount overhead) rather than zip-over-the-mount, upload the single
+resulting archive to the user's own Drive cache space, and on a later run
+check the archive's directory listing (metadata only, no decompression)
+against the currently-requested \texttt{YEARS} before trusting it --
+returns a cache miss rather than silently extracting a partial dataset if
+\texttt{YEARS} has since widened. \S3 tries this restore first; only on
+an actual cache miss does it fall back to the original per-file loop,
+then archives the result for next time. \texttt{ZIP\_STORED} (no
+compression) is used deliberately -- GRIB2 already applies its own
+internal packing, so DEFLATE would add real CPU cost for little size
+reduction; the win here is one file transferred instead of 195, not fewer
+bytes.
+
+Verified against real local data (3 real 1961--1963 temperature grib
+files) before shipping: round-tripped through archive-then-restore
+\textbf{bit-identical} (SHA-256 match), a request for a filename outside
+the cached archive correctly reports a miss instead of a partial
+extraction, a missing archive correctly reports a miss, and the local zip
+is deleted after upload rather than left behind as a duplicate multi-GB
+file. The actual Drive-transfer speedup itself -- unlike the round-trip
+correctness above -- could not be measured locally, for the same reason
+as \Cref{sec:cuda}'s GPU speedup: there is no mounted Drive to benchmark
+against outside Colab.
+
 %======================================================================
 \section{Cleanup priorities (standing list)}
 %======================================================================
