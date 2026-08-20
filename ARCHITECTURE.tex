@@ -1084,6 +1084,28 @@ correctness above -- could not be measured locally, for the same reason
 as \Cref{sec:cuda}'s GPU speedup: there is no mounted Drive to benchmark
 against outside Colab.
 
+\paragraph{Revised after a real run: per-variable, not all-or-nothing.}
+The first version above cached one archive covering all three variables
+-- meaning nothing got cached until all 192 files (64 years $\times$ 3
+variables) had been fetched, with no progress output printed in between.
+In practice this looked identical to a hung cell and the user stopped the
+runtime partway through, which under Colab's ephemeral \texttt{/content}
+filesystem discarded \emph{everything} fetched so far, including
+progress toward variables that would otherwise have already finished.
+Changed to cache \textbf{one archive per variable}
+(\texttt{era5\_completos\_\{tmp,rain,wind\}.zip}) with a progress line
+printed every 10 years, using the same \texttt{archive\_name} parameter
+\texttt{archive\_and\_cache\_raw()}/\texttt{restore\_raw\_archive()}
+already exposed (no changes needed there) -- so a variable that finishes
+and gets cached before an interruption stays cached, and the per-file
+fetch loop itself skips files already present locally (not just those
+already archived) so a resumed run within the same session doesn't
+re-copy what it already has. Verified with the same round-trip test as
+above, exercising the (previously untested) custom \texttt{archive\_name}
+path specifically: two variables cached under separate archive names,
+restored independently, bit-identical, and a request against a
+never-cached third archive name correctly misses rather than erroring.
+
 %======================================================================
 \section{Cleanup priorities (standing list)}
 %======================================================================
