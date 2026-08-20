@@ -928,6 +928,51 @@ from that reference by the old $\sim2.2\times$ factor until the reference
 is regenerated -- \texttt{t\_90}/\texttt{t\_10}/\texttt{anomalies\_above}
 should still match closely, as before.
 
+\subsection{CUDA: where it actually applies, and where it can't}
+\label{sec:cuda}
+
+Requested explicitly after \Cref{sec:reproducibility}'s and this
+document's own profiling kept showing that GPU compute wasn't the
+bottleneck. Profiled with real local data before writing any GPU code, to
+know what a CUDA port could and couldn't touch:
+
+\begin{itemize}[leftmargin=*]
+\item \textbf{GRIB decode + day/night resample}: \textbf{43.8s for one
+  year} of temperature alone (measured locally, real 2020 data) -- across
+  a 30-year baseline that's $\approx$22 minutes for temperature, with wind
+  and rain adding more. This runs through \texttt{cfgrib}/\texttt{eccodes},
+  a CPU-only C library with no CUDA path -- porting it isn't an option
+  without replacing the decoder entirely.
+\item \textbf{Shapefile clipping} (\texttt{rioxarray}/GDAL): also
+  CPU-only, no GPU-accelerated equivalent that fits this stack.
+\item \textbf{DOY-window percentile computation}: the one piece that
+  \emph{is} portable -- \textbf{21.0s for the full 30-year baseline}
+  (measured locally, real data, the vectorized numpy version from
+  \Cref{sec:daily-vs-monthly}).
+\end{itemize}
+
+Decode alone outweighs the portable math by roughly 60x for temperature;
+including wind and rain decode, more. A full "port the pipeline to CUDA"
+was explicitly not attempted for this reason -- it would mean rewriting
+around \texttt{cfgrib} and GDAL entirely, a much larger and riskier
+undertaking than the actual payoff (a few tens of seconds off a run that
+takes tens of minutes) justifies.
+
+What \emph{was} shipped: \texttt{doy\_percentile\_fast} in the multi-region
+notebook's \S10 (\Cref{sec:daily-vs-monthly}) now auto-detects a CUDA
+device via \texttt{cupy} (\texttt{cupy.cuda.is\_available()}) and runs the
+percentile computation on GPU when one is present, falling back to plain
+numpy otherwise -- same code path either way (\texttt{xp = cp if GPU else
+np}), so no separate CPU/GPU implementation to keep in sync. Verified
+locally (no CUDA device on this machine) that the fallback path is
+\textbf{bit-identical} (0.0 max diff) to the existing numpy
+implementation before shipping; the actual GPU speedup itself can only be
+measured by running it on Colab's GPU runtime, since no local GPU was
+available to benchmark against. A cell before it installs
+\texttt{cupy-cuda12x} (falling back to \texttt{cupy-cuda11x}) only if
+\texttt{cupy} isn't already importable, so it's a no-op on Colab GPU
+images that ship it preinstalled.
+
 %======================================================================
 \section{Cleanup priorities (standing list)}
 %======================================================================
