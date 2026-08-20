@@ -973,6 +973,66 @@ available to benchmark against. A cell before it installs
 \texttt{cupy} isn't already importable, so it's a no-op on Colab GPU
 images that ship it preinstalled.
 
+\subsection{\S13: third-party CUDA GRIB decoder -- explicitly unverified}
+\label{sec:third-party-grib-gpu}
+
+Requested after \Cref{sec:cuda} -- specifically, to try
+\href{https://github.com/brycetur21/grib_decoder_gpu}{brycetur21/grib\_-
+decoder\_gpu}, found and linked by the user. Read before running: this is
+\textbf{the one section of this notebook that was not, and could not be,
+verified against real data before shipping} -- every other addition in
+this document was tested locally first (see the "Verified" callouts
+throughout \Cref{sec:daily-vs-monthly,sec:count-hot-dilution}); this one
+couldn't be, since it needs a CUDA device this machine doesn't have, and
+building the CPU path alone needs Linux packages (\texttt{libeccodes-dev},
+\texttt{libhdf5-dev}) not readily available here either.
+
+What was checked instead -- cloning the repository and reading its actual
+source (1{,}453 lines across \texttt{src/}/\texttt{include/}) before
+writing any notebook code, rather than trusting its README's framing:
+
+\begin{itemize}[leftmargin=*]
+\item \textbf{0 stars, 0 forks, 1 watcher, 14 commits, single
+  contributor} -- no external validation of correctness.
+\item \textbf{It measures timing only.} \texttt{Scheduler::process\_gribs()}
+  (\texttt{src/scheduler.cu}) prints \texttt{"CPU/GPU processing took ..."}
+  and returns nothing -- no NetCDF, no array, nothing written to disk.
+  There is no output format for this pipeline (or any pipeline) to
+  consume, regardless of whether it builds or runs correctly.
+\item \textbf{Its \texttt{"both"} (CPU+GPU simultaneous) mode is broken}:
+  \texttt{cpu\_files}/\texttt{gpu\_files} are declared but the code that
+  would populate them from \texttt{filenames} is commented out, so that
+  mode processes two empty lists. The notebook only exercises
+  \texttt{cpu}/\texttt{gpu} modes separately for this reason.
+\item \textbf{Still depends on \texttt{libeccodes}} for lat/lon metadata
+  (\texttt{load\_lats\_lons\_grib}) -- confirms the earlier suspicion in
+  \Cref{sec:cuda} that this isn't a full GRIB-decode replacement; only the
+  bit-unpacking (\texttt{BitGroup}/\texttt{BitReader}) plausibly runs on
+  GPU.
+\item \textbf{Compiled for a specific architecture}:
+  \texttt{CUDA\_ARCHITECTURES 80} in \texttt{CMakeLists.txt} (Ampere/SM80)
+  -- matches Colab's A100, likely fails to run on a T4 or other
+  non-Ampere runtime.
+\item \textbf{File discovery is hardcoded}: \texttt{get\_grib\_files()}
+  only matches a literal \texttt{.grib2} extension in a hardcoded
+  \texttt{../grib\_data} path -- this repo's raw archive is
+  \texttt{era5\_*.grib} (no \texttt{2}), so the notebook copies (never
+  renames in place) a handful of real files into what the tool expects,
+  rather than touching the pipeline's own raw data.
+\end{itemize}
+
+The notebook cell installs prerequisites, clones the repo, stages sample
+files, builds with \texttt{cmake}/\texttt{make}, and if the binary exists
+afterward, runs \texttt{--device=cpu} then \texttt{--device=gpu}
+sequentially (\texttt{"both"} skipped as broken). If the build fails,
+the notebook says so explicitly rather than silently doing nothing --
+that would mean this tool needs setup beyond what its README documents,
+not that anything in the actual pipeline is broken. \textbf{This section
+does not feed into, and cannot feed into, any other part of the
+pipeline} -- it exists purely to let the tool's claims be checked
+directly in an environment (Colab, with a real GPU) that can actually
+run it, something neither this machine nor Claude could do first.
+
 %======================================================================
 \section{Cleanup priorities (standing list)}
 %======================================================================
