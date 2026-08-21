@@ -1170,6 +1170,54 @@ bit-identical. This is the same standard applied to the
 confirming the cache doesn't just store the right bytes, but that
 everything downstream of it produces exactly the same science.
 
+\subsection{Drive-API fast path: bypassing the FUSE mount itself}
+\label{sec:drive-api-fast-path}
+
+Everything above (\Cref{sec:raw-archive-cache,sec:decoded-hourly-cache})
+reduces \emph{how many} reads/writes cross the mounted Drive filesystem.
+It doesn't change how each individual large read/write happens:
+\texttt{drive.mount()} exposes Drive through a FUSE layer, which is
+widely reported (specifically for Colab) to carry real per-operation
+overhead for large sequential I/O, separate from the many-small-files
+cost already solved. \texttt{drive\_sync.download\_via\_api()}/
+\texttt{upload\_via\_api()} use the Drive API directly instead
+(\texttt{google.colab.auth} + \texttt{googleapiclient}, both preinstalled
+in Colab), streaming over HTTP rather than through the mount --
+authenticated as whichever account is already logged into the session,
+so no link-sharing is needed. This matters specifically because a plain
+public-link download (\texttt{gdown} against an anonymous share link)
+was tried early in this project for the shared \texttt{"2. Datos"}
+folder and returned HTTP 401, since that folder is shared with named
+collaborators, not publicly (module docstring) -- the API path sidesteps
+that entirely by using the account's own permissions, the same access
+\texttt{drive.mount()} already has.
+
+\texttt{restore\_raw\_archive\_fast()}/\texttt{archive\_and\_cache\_-
+raw\_fast()} wrap the API functions with the identical contract as
+\texttt{restore\_raw\_archive()}/\texttt{archive\_and\_cache\_raw()},
+trying the API path first and falling back to the proven mount-based
+functions on any failure (missing library, auth issue, folder not found,
+quota) -- wired into \S3 in place of the plain versions. This can only
+add speed, never remove functionality: worst case, behavior is identical
+to before this section existed.
+
+\paragraph{Honesty about what's verified here.} Unlike every other Drive
+interaction in this document, \textbf{the actual API calls have not been
+run at all} -- there is no Google Drive access from outside Colab to
+test them against, full stop. What \emph{was} verified locally: the path
+translation (\texttt{\_mounted\_to\_api\_path()}), and it caught a real
+bug on the first attempt -- the initial version used
+\texttt{os.path.join}/\texttt{os.sep}, which resolve based on the
+platform running the code, for a path that must always be Colab's
+(Linux) format regardless of that; testing on this Windows machine
+immediately produced wrong output (a literal \texttt{content/drive/-
+MyDrive/...} prefix left in place instead of stripped), fixed by
+hardcoding \texttt{"/"}. A full regression pass on
+\texttt{archive\_and\_cache\_raw()}/\texttt{restore\_raw\_archive()}
+confirmed this addition didn't disturb them. The actual speedup claim --
+and whether the API path works at all in a given Colab environment --
+can only be confirmed there.
+
 %======================================================================
 \section{Cleanup priorities (standing list)}
 %======================================================================
