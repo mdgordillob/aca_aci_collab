@@ -1106,6 +1106,70 @@ path specifically: two variables cached under separate archive names,
 restored independently, bit-identical, and a request against a
 never-cached third archive name correctly misses rather than erroring.
 
+\subsection{Caching Stage 3's decode step, not just the raw-file fetch}
+\label{sec:decoded-hourly-cache}
+
+The raw-archive caching above (\Cref{sec:raw-archive-cache}) fixed
+getting the raw \texttt{.grib} files into Colab quickly; it did nothing
+for what happens to them once there. A real run showed \S6a
+(temperature, all 4 regions) taking \textbf{53.6 minutes} -- confirming
+that \texttt{load\_annual\_grid\_data()}/\texttt{load\_annual\_grid\_-
+data\_safe()} (the \texttt{cfgrib} decode) was being re-run from scratch
+every session, matching this document's own earlier profiling
+(\Cref{sec:cuda}: 43.8s for one year of temperature decode alone).
+Measured again here with a cleaner, decode-only test: \textbf{20.2s to
+decode one year of temperature}, \textbf{0.8s to reload the same year
+from a cached NetCDF} -- roughly a 25x reduction on a cache hit. Wind:
+44.6s decode vs.\ 0.0s reload (wind's decode already resamples to daily
+mean internally, making the cached file tiny -- 5.6\,MB/year vs.\
+75\,MB/year for temperature's hourly data).
+
+\paragraph{Design: cache the decode step, not the science.}
+\texttt{calcular\_anomalias()}/\texttt{calcular\_anomalias\_viento()}
+already accept pre-loaded xarray data as an argument -- they don't care
+how it was loaded. So \S6a's \texttt{\_year\_task\_temp}/\texttt{\_year\_-
+task\_wind} now check a local cache before calling
+\texttt{load\_annual\_grid\_data}: on a hit, reload the cached NetCDF
+(fast); on a miss, decode as before, then write the result to the cache
+\emph{and} upload it via \texttt{drive\_sync.cache\_upload()} before
+proceeding. \textbf{Zero changes to \texttt{calcular\_anomalias\_-
+temperatura.py}/\texttt{calcular\_anomalias\_viento.py}} -- this caches
+only the decode step that already fed them, so it has no interaction
+with the still-open multiprocessing-correctness question
+(\Cref{sec:reproducibility}) that is the reason Stage 3's actual
+per-region \emph{output} is deliberately not cached.
+
+\paragraph{Per year, uploaded immediately -- not batched.} Directly
+informed by what happened with the raw-archive cache
+(\Cref{sec:raw-archive-cache}'s "revised after a real run" note): a
+53-minute stage is long enough to plausibly get interrupted, and an
+all-or-nothing archive built only after every year finishes would lose
+everything in that case. Each worker task uploads its own year's cache
+file as soon as that year's decode completes, inside the
+\texttt{multiprocessing.Pool} task itself (safe under Colab's fork start
+method -- the mounted Drive filesystem is inherited by forked workers,
+no per-worker re-authentication needed, and each year writes to a
+uniquely-named file so there's no cross-worker write conflict). A
+cache-write/upload failure is caught separately from a decode failure --
+the year's data is already successfully decoded and in memory at that
+point, so a Drive hiccup costs that year's caching benefit next time,
+not this run's result.
+
+\paragraph{Verified against real local data before shipping.} Beyond the
+raw array round-trip (bit-identical values and time coordinates,
+confirmed above), the check that actually matters: decode-fresh vs.\
+load-from-cache were run through the complete, unmodified
+\texttt{calcular\_anomalias()}/\texttt{calcular\_anomalias\_viento()}
+call chain (shapefile clip, monthly extraction, percentile comparison,
+standardization) for a real month (June 2021, Colombia), and every
+output column compared. Temperature: \texttt{t\_90}, \texttt{t\_10},
+\texttt{count\_hot}, \texttt{count\_cold} all bit-identical between the
+two paths. Wind: \texttt{count\_above}, \texttt{anomalies\_above} both
+bit-identical. This is the same standard applied to the
+\texttt{count\_hot} dilution fix (\Cref{sec:count-hot-dilution}) --
+confirming the cache doesn't just store the right bytes, but that
+everything downstream of it produces exactly the same science.
+
 %======================================================================
 \section{Cleanup priorities (standing list)}
 %======================================================================
