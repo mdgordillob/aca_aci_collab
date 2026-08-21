@@ -1300,6 +1300,58 @@ re-confirmed the exact Jan-2020-Colombia reference values from
 \texttt{count\_cold=0.03369}) still match exactly, so this addition
 doesn't disturb that fix.
 
+\subsection{Stage 3 output caching -- a deliberate, flagged exception}
+\label{sec:stage3-output-cache}
+
+Every other cache in this notebook (\Cref{sec:raw-archive-cache,%
+sec:decoded-hourly-cache}) caches an intermediate step -- raw files,
+decoded-but-unclipped arrays -- specifically \emph{not} Stage 3's actual
+per-region result, because whether \texttt{multiprocessing.Pool} produces
+different \texttt{t\_90}/\texttt{t\_10} values than running sequentially
+has never been resolved either way (\Cref{sec:reproducibility}). Asked
+explicitly to cache the output anyway despite that; agreed to, on the
+condition of flagging it clearly rather than caching around the question
+quietly.
+
+\texttt{run\_variable\_multi\_region()} now checks
+\texttt{restore\_raw\_archive\_fast()} for a cached set of per-region
+output CSVs (keyed by variable and year range --
+\texttt{tmp\_1961\_2024.zip} etc. -- so a different \texttt{YEARS} scope
+naturally lands in a different cache entry rather than needing content
+inspection to detect a mismatch) before doing any computation at all; a
+hit skips Stage 1--3 decoding \emph{and} the per-region clip/anomaly
+work entirely and returns immediately. \textbf{A hit prints a loud,
+unmissable warning} that this is a prior run's result, correctness
+question unchecked, not merely a quiet cache-restore message like every
+other cache in this notebook -- deliberately louder, since what's being
+skipped here is the actual computation the open question is about, not
+just an expensive-but-verified intermediate. If that question is ever
+resolved and changes Stage 3's output, this specific cache
+(\texttt{aca\_colab\_cache/stage3\_output/} on Drive) needs manual
+clearing -- nothing here invalidates it automatically.
+
+Output files live in per-region subdirectories
+(\texttt{anomalias\_colombia/anomalies\_temperature\_combined.csv} etc.),
+not a flat directory like every previous use of
+\texttt{archive\_and\_cache\_raw\_fast()}/\texttt{restore\_raw\_archive\_-
+fast()} -- confirmed those functions handle nested-path arcnames
+correctly (zipfile recreates the subdirectory structure on extraction)
+before relying on it, using \textbf{hardcoded forward slashes} rather
+than \texttt{os.path.join()} to build those names, the same fix as
+\Cref{sec:drive-api-fast-path}'s \texttt{\_mounted\_to\_api\_path()} --
+zip archive paths are POSIX-style regardless of what platform builds the
+string, and a first attempt at testing this locally on Windows
+reproduced exactly that failure mode (backslash-joined names not
+matching the archive's forward-slash-stored entries) before the fix.
+
+Verified end-to-end with real local data (2 years, 1 region, through the
+actual \texttt{multiprocessing.Pool} path, not a simplified stand-in):
+first call computed normally and cached the result; a simulated fresh
+session (local output deleted) then restored from cache in 0.00s --
+genuinely skipping computation, not just running fast -- with the
+restored CSV byte-identical to the original and the correctness warning
+printed exactly as designed.
+
 %======================================================================
 \section{Cleanup priorities (standing list)}
 %======================================================================
