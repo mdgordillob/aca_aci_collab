@@ -1218,6 +1218,51 @@ confirmed this addition didn't disturb them. The actual speedup claim --
 and whether the API path works at all in a given Colab environment --
 can only be confirmed there.
 
+\subsection{Progress reporting: every long transfer, not just some}
+\label{sec:progress-reporting}
+
+A long-running cell with zero output in the middle is indistinguishable
+from a hung one -- already cost one lost run this session, when a
+silent, all-or-nothing raw-grib fetch led to the runtime being stopped
+mid-transfer (\Cref{sec:raw-archive-cache}'s "revised after a real run"
+note). That fix addressed \emph{losing progress}; it didn't address the
+\emph{visibility} gap in every other long transfer this document has
+since added -- zip writing/extraction, mounted-filesystem copies, and
+the Drive-API chunked download/upload all ran silently until they
+finished. All now print an updating (\texttt{\textbackslash r}-based)
+progress line: file counts for zip operations, byte counts (via a new
+\texttt{\_copy\_with\_progress()} helper) for mounted copies, and
+percent complete (from \texttt{status.progress()}) for the Drive-API
+chunks. \texttt{cache\_restore()}/\texttt{cache\_upload()} get the same
+treatment for multi-file batches, but deliberately stay silent for
+single-file calls -- the ones made per-year inside Stage 3's
+\texttt{multiprocessing.Pool} workers (\Cref{sec:decoded-hourly-cache}),
+where many parallel one-line progress bars would be noise, not
+signal.
+
+\paragraph{A second real bug, caught by the same discipline that's held
+all session.} The first attempt at adding progress to
+\texttt{restore\_raw\_archive()} copied the entire mounted zip to a
+local staging path \emph{before} checking whether it even covered the
+requested years -- doubling peak local disk usage for no reason, and
+discarding the existing fast completeness check (reading a zip's central
+directory needs only a small metadata read, not the file body). Worse:
+the staging path was built by appending a suffix to the \emph{mounted
+source path itself}, so running it would have written a duplicate
+multi-GB file back onto Drive rather than to local disk. Caught
+immediately by re-running the existing regression tests after the
+change, per \Cref{sec:count-hot-dilution}'s standard -- reverted to
+reading directly from the mount with per-file progress during
+extraction only, no staging copy. Verified afterward with real local
+data (round-trip through both the plain and \texttt{\_fast} restore/
+cache functions, bit-identical), including confirming the \texttt{\_fast}
+functions' fallback path itself: this machine has no
+\texttt{googleapiclient} installed, so every test run exercises the
+"API unavailable" branch for real, printing the fallback message and
+producing correct results via the mount-based path -- an incidental
+re-confirmation that the fallback logic actually works, not just that
+it's present in the code.
+
 %======================================================================
 \section{Cleanup priorities (standing list)}
 %======================================================================
