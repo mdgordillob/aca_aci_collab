@@ -1263,6 +1263,43 @@ producing correct results via the mount-based path -- an incidental
 re-confirmation that the fallback logic actually works, not just that
 it's present in the code.
 
+\subsection{The real remaining bottleneck wasn't GPU-shaped: a redundant clip}
+\label{sec:clipped-percentile-cache}
+
+Asked whether GPU could speed up the anomaly calculation itself, now that
+\Cref{sec:decoded-hourly-cache}'s per-year decode caching removes most of
+Stage 3's cost. Profiled \texttt{calcular\_anomalias()} directly rather
+than guessing: the shapefile clip on the grid \emph{data} is only 8\% of
+a region-year (1.45s), and the actual percentile-comparison math is
+negligible (0.03s) -- neither was a meaningful GPU target, consistent
+with \Cref{sec:cuda}'s finding that this pipeline's array sizes are far
+too small to benefit. The other 92\% (1.2--1.3s, measured repeatedly)
+turned out to be \texttt{calcular\_anomalias()}/\texttt{calcular\_-
+anomalias\_viento()} re-clipping the \emph{percentile file} to the same
+shapefile on \emph{every single call} -- even though the clipped result
+for a given (percentile file, month, shapefile) never changes.
+\texttt{get\_cached\_percentiles()} already caches the unclipped load by
+(file, month); the clip step downstream of it just never got the same
+treatment, in either script.
+
+This specifically matters for the Colab notebook's Stage 3 multiprocessing:
+one worker handles many years for the same region, so this was an
+identical clip repeated once per year, for every year that worker
+happened to process. Fixed with \texttt{get\_cached\_clipped\_-
+percentiles()} (same caching pattern as \texttt{get\_cached\_percentiles()},
+keyed additionally by \texttt{shapefile\_path}), wired into both
+\texttt{calcular\_anomalias()} and \texttt{calcular\_anomalias\_viento()}
+in place of their inline uncached clip. Verified against real local data:
+three repeated calls for the same (file, month, shapefile) went from
+1.35s/0.96s (temperature/wind, first call, populates the cache) to
+0.07s/0.03s on the second and third calls -- roughly 18--30x faster on a
+hit -- with all three calls producing bit-identical output. Also
+re-confirmed the exact Jan-2020-Colombia reference values from
+\Cref{sec:count-hot-dilution} (\texttt{t\_90=2.781},
+\texttt{t\_10=-0.8136}, \texttt{count\_hot=0.4373},
+\texttt{count\_cold=0.03369}) still match exactly, so this addition
+doesn't disturb that fix.
+
 %======================================================================
 \section{Cleanup priorities (standing list)}
 %======================================================================
